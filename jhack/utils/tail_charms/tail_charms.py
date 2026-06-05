@@ -1,4 +1,6 @@
+import os
 import re
+import stat as _stat
 import sys
 from pathlib import Path
 from typing import (
@@ -183,9 +185,11 @@ def _tail_charms(
             False  # it's too late for that, we're replaying the history and transforming it.
         )
 
-    # FIXME: when debugging, this heuristic is incorrect.
-    read_from_stdin = not sys.stdin.isatty()
-    # read_from_stdin = False
+    # Only treat stdin as an input source when it is an actual pipe or file.
+    # A bare non-TTY context (e.g. GitHub Actions, /dev/null redirect) is a
+    # character device, not a FIFO, so it should not be mistaken for piped input.
+    _stdin_mode = os.fstat(sys.stdin.fileno()).st_mode
+    read_from_stdin = _stat.S_ISFIFO(_stdin_mode) or _stat.S_ISREG(_stdin_mode)
 
     if (read_from_stdin or files) and auto_bump_loglevel:
         logger.debug("static input mode. Overriding auto loglevel bumping.")
