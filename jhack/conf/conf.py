@@ -176,9 +176,21 @@ def doc_devmode_only(command: types.FunctionType):
     return command
 
 
+_YES_FLAG = False
+
+
+def enable_yes_flag():
+    global _YES_FLAG
+    _YES_FLAG = True
+
+
 def check_destructive_commands_allowed(
     msg: str, dry_run_cmd: str = "", _check_only=False
 ) -> Union[_Denied, _Allowed]:
+    if _YES_FLAG:
+        logger.debug(f"operation {msg!r} allowed by --yes flag.")
+        return _Allowed(_Reason.user)
+
     if os.getenv("JHACK_PROFILE") == "devmode":
         logger.debug(f"operation {msg!r} allowed by devmode profile.")
         return _Allowed(_Reason.devmode_temp)

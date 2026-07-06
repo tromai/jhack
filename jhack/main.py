@@ -33,6 +33,7 @@ def main():
     from jhack.charm.update import update
     from jhack.charm.vinfo import vinfo
     from jhack.conf.conf import (
+        enable_yes_flag,
         print_current_config,
         print_defaults,
         print_destructive,
@@ -81,6 +82,16 @@ def main():
         sep = sys.argv.index("--")
         typer.Typer._extra_args = sys.argv[sep + 1 :]
         sys.argv = sys.argv[:sep]
+
+    # Strip -y/--yes from anywhere in argv before Typer parses them,
+    # so the flag works regardless of position in the command.
+    remaining = [sys.argv[0]]
+    for arg in sys.argv[1:]:
+        if arg in ("-y", "--yes"):
+            enable_yes_flag()
+        else:
+            remaining.append(arg)
+    sys.argv = remaining
 
     # Add to all devmode-only commands a doc line warning the user it's only "safe" but not ``safe`` to use them
     for devmode_only_command in {
@@ -263,7 +274,14 @@ def main():
     app.add_typer(chaos, no_args_is_help=True)
 
     @app.callback()
-    def logging_config(loglevel: str = None, log_to_file: Path = None):
+    def logging_config(
+        loglevel: str = None,
+        log_to_file: Path = None,
+        yes: bool = typer.Option(False, "--yes", "-y", help="Skip all confirmation prompts."),
+    ):
+        if yes:
+            enable_yes_flag()
+
         if loglevel:
             valid_loglevels = {
                 "CRITICAL",
