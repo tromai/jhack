@@ -79,14 +79,24 @@ These commands will prompt the user for confirmation before proceeding, after, w
 ## Enabling devmode
 In devmode, destructive commands will be run without requiring a confirmation prompt.
 
-You can permanently enable devmode by setting `~/.config/jhack/config.toml` (see `jhack conf`) and set `[general]enable_destructive_commands_NO_PRODUCTION_zero_guarantees` to `true`.
+There are three ways to bypass the safety confirmation prompt:
 
-To view example 'destructive' and 'yolo' profiles, you can run: 
+1. **Permanent** — set `~/.config/jhack/config.toml` (see `jhack conf`) and set
+   `[general]enable_destructive_commands_NO_PRODUCTION_zero_guarantees` to `true`.
 
-> `jhack conf destructive` 
-> `jhack conf yolo` 
+   To view example 'destructive' and 'yolo' profiles, you can run:
+   > `jhack conf destructive`
+   > `jhack conf yolo`
 
-Otherwise, set the `JHACK_PROFILE=devmode` envvar to run a single command without the confirmation prompt. 
+2. Per-session (environment): export this envvar to bypass safety safeguards for a session:
+   > `export JHACK_PROFILE=devmode`
+3. Per-command (environment): set the `JHACK_PROFILE=devmode` envvar for a single invocation:
+   > `JHACK_PROFILE=devmode jhack fire prom/0 update-status`
+   
+4. Per-command (CLI flag): pass the `--devmode` flag anywhere in the command:
+   > `jhack fire prom/0 update-status --devmode`
+   > `jhack --devmode sync`
+   > `jhack nuke --devmode`
 
 As only exception, nuke has a double safeguard in that even if you enable devmode, you will still get a confirmation prompt.
 To disable that one, set `[nuke]ask_for_confirmation` to `false`.
