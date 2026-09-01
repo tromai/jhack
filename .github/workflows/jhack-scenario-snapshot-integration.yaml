@@ -1,0 +1,78 @@
+name: jhack scenario snapshot - live integration smoke tests
+
+# Smoke-tests `jhack scenario snapshot` against real, Concierge-bootstrapped
+# Juju controllers, across:
+#   - Juju versions: 3.6/stable, 4.0/stable
+#   - Providers: Canonical Kubernetes (k8s), LXD (machine)
+#   - Charm bases: ubuntu@22.04, ubuntu@24.04, ubuntu@26.04
+#
+# Scope (per snapshot_test_plan.md): smoke-test only. We deploy a small charm,
+# wait for it to settle, then assert `jhack scenario snapshot <unit>` exits 0
+# and produces non-empty output for each output format. No assertions are made
+# yet about the correctness of individual State fields.
+#
+# NOTE: snappass-test (the k8s smoke charm) only publishes a single base to
+# Charmhub, so the "base" axis has no real effect on the k8s leg today; it's
+# kept for matrix symmetry with the machine leg. See
+# jhack/tests/integration/test_snapshot_k8s.py for details.
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    strategy:
+      fail-fast: false
+      matrix:
+        juju-channel: ["3.6/stable", "4.0/stable"]
+        provider: ["k8s", "machine"]
+        base: ["22.04", "24.04", "26.04"]
+
+    env:
+      JHACK_RUN_INTEGRATION_TESTS: "1"
+      JHACK_TEST_BASE: ${{ matrix.base }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: sudo snap install --classic concierge
+
+      # .github/integration/concierge-*.yaml mirrors the upstream concierge
+      # preset and adds juju.extra-bootstrap-args: `juju bootstrap` regularly
+      # fails on slow GHA runners with `unable to contact api server after
+      # 60 attempts` because the default --bootstrap-timeout is too short.
+      - name: Bootstrap Juju ${{ matrix.juju-channel }} on ${{ matrix.provider }}
+        run: >
+          sudo concierge prepare
+          --juju-channel=${{ matrix.juju-channel }}
+          -c .github/integration/concierge-${{ matrix.provider }}.yaml
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install jhack + integration test deps
+        run: uv pip install --system -e ".[integration]"
+
+      - name: Run jhack scenario snapshot smoke test (${{ matrix.provider }})
+        run: |
+          pytest jhack/tests/integration \
+            -m ${{ matrix.provider }} \
+            --log-cli-level=INFO -v \
+            --juju-dump-logs=jhack-debug-logs
+        timeout-minutes: 30
+
+      - name: Upload juju debug logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: juju-debug-logs-${{ matrix.provider }}-${{ strategy.job-index }}
+          path: jhack-debug-logs
+          if-no-files-found: ignore
+          include-hidden-files: true
