@@ -80,7 +80,7 @@ def _assert_snapshot_smoke(juju: jubilant.Juju, app_name: str, format_: str):
     """Run `jhack scenario snapshot <unit> -f <format_>` and check it succeeded."""
     unit = _any_unit(juju, app_name)
 
-    result = _run_snapshot(juju, unit, "-f", f"{format_} --devmode")
+    result = _run_snapshot(juju, unit, "-f", format_, "--devmode")
 
     assert result.returncode == 0, (
         f"jhack scenario snapshot exited {result.returncode}.\n"
