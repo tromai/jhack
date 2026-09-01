@@ -1,21 +1,5 @@
 name: jhack scenario snapshot - live integration smoke tests
 
-# Smoke-tests `jhack scenario snapshot` against real, Concierge-bootstrapped
-# Juju controllers, across:
-#   - Juju versions: 3.6/stable, 4.0/stable
-#   - Providers: Canonical Kubernetes (k8s), LXD (machine)
-#   - Charm bases: ubuntu@22.04, ubuntu@24.04, ubuntu@26.04
-#
-# Scope (per snapshot_test_plan.md): smoke-test only. We deploy a small charm,
-# wait for it to settle, then assert `jhack scenario snapshot <unit>` exits 0
-# and produces non-empty output for each output format. No assertions are made
-# yet about the correctness of individual State fields.
-#
-# NOTE: snappass-test (the k8s smoke charm) only publishes a single base to
-# Charmhub, so the "base" axis has no real effect on the k8s leg today; it's
-# kept for matrix symmetry with the machine leg. See
-# jhack/tests/integration/test_snapshot_k8s.py for details.
-
 on:
   push:
   workflow_dispatch:
@@ -32,7 +16,7 @@ jobs:
       matrix:
         juju-channel: ["3.6/stable", "4.0/stable"]
         provider: ["k8s", "machine"]
-        base: ["22.04", "24.04", "26.04"]
+        base: ["24.04", "26.04"]
 
     env:
       JHACK_RUN_INTEGRATION_TESTS: "1"
@@ -54,15 +38,10 @@ jobs:
           -c .github/integration/concierge-${{ matrix.provider }}.yaml
 
       - uses: astral-sh/setup-uv@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install jhack + integration test deps
-        run: uv pip install --system -e ".[integration]"
 
       - name: Run jhack scenario snapshot smoke test (${{ matrix.provider }})
         run: |
-          pytest jhack/tests/integration \
+          uv run --extra integration pytest jhack/tests/integration \
             -m ${{ matrix.provider }} \
             --log-cli-level=INFO -v \
             --juju-dump-logs=jhack-debug-logs

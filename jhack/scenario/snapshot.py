@@ -296,10 +296,16 @@ def get_networks(
     metadata: Dict,
     include_dead: bool = False,
     relations: Tuple[str, ...] = (),
-) -> Dict[str, Network]:
+) -> List[Network]:
     """Get all Networks from this unit."""
     logger.info("getting networks...")
-    networks = {"juju-info": get_network(target, model, "juju-info")}
+    # NOTE: ops.testing.State.networks is a frozenset[Network] (Scenario 8), not a
+    # Dict[str, Network] (that was the Scenario 6 API). Network carries its own
+    # `binding_name`, so we return a plain list here; State.__post_init__ will
+    # coerce it to a frozenset. Do NOT return a dict: State.__post_init__ does
+    # `frozenset(val)`, which for a dict iterates over its *keys* only, silently
+    # discarding all the Network objects.
+    networks = [get_network(target, model, "juju-info")]
 
     endpoints = relations  # only alive relations
     if include_dead:
@@ -311,7 +317,7 @@ def get_networks(
 
     for endpoint in endpoints:
         logger.debug(f"  getting network for endpoint {endpoint!r}")
-        networks[endpoint] = get_network(target, model, endpoint)
+        networks.append(get_network(target, model, endpoint))
     return networks
 
 
@@ -1033,7 +1039,7 @@ def _snapshot(
                     include_dead=include_dead_relation_networks,
                     relations=endpoints,
                 ),
-                {},
+                [],
             ),
             secrets=if_include(
                 "S",

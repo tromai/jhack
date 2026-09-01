@@ -4,7 +4,7 @@
 
 """Facilities to convert json to State."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict
 
@@ -13,9 +13,13 @@ from scenario import Model, State
 from scenario.state import (
     Address,
     BindAddress,
+    CheckInfo,
     Container,
     DeferredEvent,
+    Exec,
+    Mount,
     Network,
+    Notice,
     PeerRelation,
     Port,
     Relation,
@@ -67,9 +71,51 @@ def _dict_to_network(value: Dict) -> Network:
     return Network(**value)
 
 
+def _dict_to_mount(value: Dict) -> Mount:
+    return Mount(**value)
+
+
+def _dict_to_exec(value: Dict) -> Exec:
+    return Exec(**value)
+
+
+def _dict_to_notice(value: Dict) -> Notice:
+    value = dict(value)
+    for key in ("first_occurred", "last_occurred", "last_repeated"):
+        if value.get(key):
+            value[key] = datetime.fromisoformat(value[key])
+    for key in ("repeat_after", "expire_after"):
+        if value.get(key) is not None:
+            value[key] = timedelta(seconds=value[key])
+    return Notice(**value)
+
+
+def _dict_to_check_info(value: Dict) -> CheckInfo:
+    value = dict(value)
+    if value.get("level") is not None:
+        value["level"] = pebble.CheckLevel(value["level"])
+    if value.get("change_id") is not None:
+        value["change_id"] = pebble.ChangeID(value["change_id"])
+    return CheckInfo(**value)
+
+
 def _dict_to_container(value: Dict) -> Container:
+    value = dict(value)
     if layers := value.get("layers"):
         value["layers"] = {l_name: pebble.Layer(l_raw) for l_name, l_raw in layers.items()}
+    if mounts := value.get("mounts"):
+        value["mounts"] = {m_name: _dict_to_mount(m) for m_name, m in mounts.items()}
+    # NB: Container.__post_init__ only auto-coerces `execs` to a frozenset;
+    # `check_infos` is left as whatever type we pass in. So use `is not None`
+    # (not truthiness) here: an *empty* list must still be converted to a
+    # frozenset()/list, or the roundtripped Container won't compare equal to
+    # one built with the field omitted (which defaults to frozenset()/[]).
+    if (execs := value.get("execs")) is not None:
+        value["execs"] = {_dict_to_exec(e) for e in execs}
+    if (notices := value.get("notices")) is not None:
+        value["notices"] = [_dict_to_notice(n) for n in notices]
+    if (check_infos := value.get("check_infos")) is not None:
+        value["check_infos"] = {_dict_to_check_info(c) for c in check_infos}
     return Container(**value)
 
 

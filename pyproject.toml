@@ -51,6 +51,10 @@ integration = [
 
 [tool.pytest.ini_options]
 log_cli_format = "%(levelname)s %(name)s %(message)s"
+markers = [
+    "machine: live integration test targets a machine (lxd) substrate.",
+    "k8s: live integration test targets a Canonical Kubernetes substrate.",
+]
 
 [project.scripts]
 jhack = "jhack.main:main"
