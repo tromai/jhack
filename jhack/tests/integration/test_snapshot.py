@@ -19,12 +19,24 @@ they're skipped at collection time unless JHACK_RUN_INTEGRATION_TESTS is set,
 so `pytest jhack/tests` (the unit test entrypoint) never tries to run them
 against a real cloud. The `machine`/`k8s` markers below are registered in
 pyproject.toml's [tool.pytest.ini_options].
+
+SSH note (machine leg only): as of Juju 4, `juju ssh`/`juju scp` require the
+client's SSH public key to be registered against the model with
+`juju add-ssh-key` first -- Juju no longer does this automatically. `jhack
+scenario snapshot` on machine units shells out to both (`get_metadata`,
+`RemotePebbleClient`, `fetch_blob`/`fetch_file`), so without a registered key
+every invocation fails with `JujuSSHError: SSH access failed (exit code
+255)`. `_ensure_ssh_key` below generates a throwaway keypair (if one isn't
+already present) and registers it via `juju.cli("add-ssh-key", ...)` before
+the machine-leg tests run. The k8s leg is unaffected: `juju ssh --container`
+against a k8s unit is proxied through the k8s API, not real SSH.
 """
 
 import json
 import logging
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -46,10 +58,61 @@ K8S_APP_NAME = "snappass-test"
 BASE = os.environ.get("JHACK_TEST_BASE")
 
 
+def _ensure_ssh_key(juju: jubilant.Juju):
+    """Ensure the current user's SSH public key is registered with the model.
+
+    Juju 4 requires `juju add-ssh-key` before `juju ssh`/`juju scp` will work;
+    it's no longer done implicitly. Generates a throwaway keypair if the user
+    (or CI runner) doesn't already have one.
+
+    Unlike jubilant's own `tests/integration/test_machine.py` (which generates
+    a per-test-module ephemeral keypair and passes it explicitly via
+    `ssh_options=['-i', <path>]` to `juju.ssh`/`juju.scp`), we can't do that
+    here: `jhack scenario snapshot` shells out to `juju ssh`/`juju scp`
+    internally (`_juju_ssh`, `RemotePebbleClient`, `fetch_blob`/`fetch_file`)
+    with no way to pass a custom identity file. So we must rely on OpenSSH's
+    default identity discovery, which means writing (or reusing) a real
+    default-location keypair at ~/.ssh/id_ed25519 -- this persists on the
+    host/runner rather than being cleaned up per-test.
+
+    Note: `juju add-ssh-key` exits 0 even if the key is already registered
+    (it just logs "... already exist" to stderr and continues), so no
+    duplicate-key error handling is needed here.
+    """
+    ssh_dir = Path.home() / ".ssh"
+    pub_key_path = ssh_dir / "id_ed25519.pub"
+    priv_key_path = ssh_dir / "id_ed25519"
+
+    if not pub_key_path.exists():
+        ssh_dir.mkdir(mode=0o700, exist_ok=True)
+        logger.info("no SSH keypair found at %s; generating one", pub_key_path)
+        subprocess.run(
+            [
+                "ssh-keygen",
+                "-t",
+                "ed25519",
+                "-N",
+                "",
+                "-f",
+                str(priv_key_path),
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+    pub_key = pub_key_path.read_text().strip()
+    juju.add_ssh_key(pub_key)
+
+
 @pytest.mark.machine
 @pytest.mark.juju_setup
 def test_deploy_machine(juju: jubilant.Juju):
     """Deploy a plain ubuntu machine charm to snapshot against."""
+    # Must happen before any `jhack scenario snapshot` call: Juju 4 requires
+    # the client's SSH public key to be registered against the model before
+    # `juju ssh`/`juju scp` will work (see module docstring).
+    _ensure_ssh_key(juju)
+
     kwargs = {}
     if BASE:
         kwargs["base"] = f"ubuntu@{BASE}"
