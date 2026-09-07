@@ -872,7 +872,10 @@ class _RemoteControllerStorage:
 
     def get_stored_states(self) -> List[StoredState]:
         stored_states: List[StoredState] = []
-        for key, val in self._state_get().items():
+        raw = self._state_get()
+        if raw is None:
+            return []
+        for key, val in raw.items():
             if key == self.notices_key:
                 continue
             stored_state_key_re = re.compile(r"(\S+)\[(\S+)]")
