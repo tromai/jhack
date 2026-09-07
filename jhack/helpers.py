@@ -575,14 +575,16 @@ def fetch_blob(
     remote_path: Union[Path, str],
     local_path: Optional[Union[Path, str]] = None,
     model: Optional[str] = None,
-    container_name: str = "charm",
+    container_name: Optional[str] = "charm",
 ) -> Optional[bytes]:
     model_arg = f" -m {model}" if model else ""
     charm_path = charm_root_path(unit) / remote_path
+    # Only pass --container on k8s models; machine models don't support it.
+    container_arg = f" --container {container_name}" if container_name else ""
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         dest_path = local_path if local_path else Path(tmp_dir) / "blob"
-        cmd = f"juju scp{model_arg} --container {container_name} {unit}:{charm_path} {dest_path}"
+        cmd = f"juju scp{model_arg}{container_arg} {unit}:{charm_path} {dest_path}"
         try:
             JSubprocess.run(shlex.split(cmd), text=True, capture_output=True, check=True)
         except CalledProcessError as e:
@@ -600,11 +602,13 @@ def fetch_file(
     remote_path: Union[Path, str],
     local_path: Optional[Union[Path, str]] = None,
     model: Optional[str] = None,
-    container_name: str = "charm",
+    container_name: Optional[str] = "charm",
 ) -> Optional[str]:
     model_arg = f" -m {model}" if model else ""
     charm_path = charm_root_path(unit) / remote_path
-    cmd = f"juju ssh{model_arg} --container {container_name} {unit} cat {charm_path}"
+    # Only pass --container on k8s models; omit it for machine charms.
+    container_arg = f" --container {container_name}" if container_name else ""
+    cmd = f"juju ssh{model_arg}{container_arg} {unit} cat {charm_path}"
     try:
         raw = JSubprocess.run(shlex.split(cmd), text=True, capture_output=True, check=True).stdout
     except CalledProcessError:

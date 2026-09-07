@@ -858,7 +858,14 @@ class _RemoteControllerStorage:
         return yaml.load(val, Loader=_SimpleLoader)
 
     def notices(self):
-        return self._py_parse(self._state_get(f"'{self.notices_key}'")[self.notices_key])
+        # `state-get` returns empty output (yaml.safe_load → None) when the
+        # charm has no stored state at all (e.g. a plain ops charm, or the
+        # 'ubuntu' charm which doesn't use ops StoredState).  Guard against
+        # that rather than letting `None[key]` raise TypeError.
+        result = self._state_get(f"'{self.notices_key}'")
+        if result is None:
+            return []
+        return self._py_parse(result[self.notices_key])
 
     def load_snapshot(self, key: str):
         return self._state_get(key)
@@ -878,19 +885,25 @@ class _RemoteControllerStorage:
 class RemoteUnitStateDB:
     """Represents a remote unit's state db."""
 
-    def __init__(self, model: Optional[str], target: JujuUnitName):
+    def __init__(self, model: Optional[str], target: JujuUnitName, is_k8s: bool = False):
         self._model = model
         self._target = target
+        self._is_k8s = is_k8s
 
         self._tempfile = tempfile.NamedTemporaryFile()
         self._db_path = Path(self._tempfile.name)
-        self._db: Union[_RemoteControllerStorage, SQLiteStorage] = self.get_db()
+        self._db: Union[_RemoteControllerStorage, SQLiteStorage] = self.get_db(is_k8s=is_k8s)
 
-    def _fetch_state(self):
+    def _fetch_state(self, is_k8s: bool = False):
+        # On machine models, `juju scp` does not support `--container`;
+        # passing it causes scp to fail, which triggers the FetchError and
+        # incorrectly falls back to _RemoteControllerStorage (controller storage
+        # fallback is only correct for k8s sidecar charms).  Only pass the
+        # container name when we are actually on a k8s model.
         fetch_blob(
             unit=self._target,
             remote_path=self._target.remote_charm_root / ".unit-state.db",
-            container_name="charm",
+            container_name="charm" if is_k8s else None,
             local_path=self._db_path,
             model=self._model,
         )
@@ -900,10 +913,10 @@ class RemoteUnitStateDB:
         """Whether the state file exists."""
         return self._db_path.exists() and self._db_path.read_bytes()
 
-    def get_db(self) -> Union[_RemoteControllerStorage, SQLiteStorage]:
+    def get_db(self, is_k8s: bool = False) -> Union[_RemoteControllerStorage, SQLiteStorage]:
         if not self._has_state:
             try:
-                self._fetch_state()
+                self._fetch_state(is_k8s=is_k8s)
             except FetchError:
                 logger.debug(
                     "failed fetching unit-state db file; is this charm using controller storage?"
@@ -992,7 +1005,8 @@ def _snapshot(
         sys.exit(1)
 
     try:
-        unit_state_db = RemoteUnitStateDB(model, target)
+        is_k8s = state_model.type == "kubernetes"
+        unit_state_db = RemoteUnitStateDB(model, target, is_k8s=is_k8s)
         juju_status = get_juju_status(model)
         endpoints = get_endpoints(juju_status, target)
         status = get_status(juju_status, target=target)
