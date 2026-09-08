@@ -461,12 +461,9 @@ def _assert_snapshot_json(juju: jubilant.Juju, app_name: str):
     model = payload["model"]
     assert model.get("name"), "model.name is empty"
     assert model.get("uuid"), "model.uuid is empty"
-    # Use the type from the JSON payload itself as the reference — jhack reads
-    # it from ``juju status`` which returns "kubernetes" or "iaas".  We just
-    # verify it is one of the two valid values and is non-empty.
-    assert model.get("type") in ("kubernetes", "iaas"), (
-        f"unexpected model.type: {model.get('type')!r}"
-    )
+    # Juju returns different type strings depending on the provider:
+    # "kubernetes", "iaas", "lxd", etc.  Just assert it's a non-empty string.
+    assert model.get("type"), "model.type is empty"
 
     # ------------------------------------------------------------------
     # Status: both app_status and unit_status must have a non-empty name.
