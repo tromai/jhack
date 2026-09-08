@@ -46,6 +46,7 @@ from scenario.state import (
     Network,
     Port,
     Relation,
+    Resource,
     Secret,
     State,
     _EntityStatus,
@@ -288,6 +289,41 @@ def get_secrets(
     """Get Secret list from the charm."""
     logger.warning("Secrets snapshotting not implemented yet. Also, are you *sure*?")
     return []
+
+
+def get_resources(
+    target: JujuUnitName,
+    model: Optional[str],
+    metadata: Dict,
+) -> List[Resource]:
+    """Get Resource list from the charm's metadata.
+
+    NOTE: Only names are captured; the actual resource files are not downloaded.
+    ``Resource.path`` is set to an empty string as a placeholder — override
+    before passing the state to ``Context.run()`` if the charm exercises the
+    resource in the event under test.
+    """
+    logger.info("getting resources...")
+    resources = []
+    for name in metadata.get("resources", {}):
+        resources.append(Resource(name=name, path=""))
+    if resources:
+        logger.warning(
+            "Resource paths are not captured by snapshot. "
+            "Set Resource.path to a real file before running the test."
+        )
+    return resources
+
+
+def get_planned_units(
+    target: JujuUnitName,
+    juju_status: Dict,
+) -> int:
+    """Get the number of planned units for the target's application."""
+    app = juju_status["applications"][target.app_name]
+    # `unit-count` is present in modern juju status JSON; fall back to
+    # counting the `units` dict for older juju versions.
+    return app.get("unit-count") or len(app.get("units", {}))
 
 
 def get_networks(
@@ -1020,6 +1056,7 @@ def _snapshot(
             app_status=status.app,
             workload_version=status.workload_version,
             model=state_model,
+            planned_units=get_planned_units(target, juju_status),
             config=if_include("c", lambda: get_config(target, model), {}),
             opened_ports=if_include(
                 "p",
@@ -1066,6 +1103,11 @@ def _snapshot(
                     metadata,
                     relations=endpoints,
                 ),
+                [],
+            ),
+            resources=if_include(
+                "R",
+                lambda: get_resources(target, model, metadata),
                 [],
             ),
             deferred=if_include(
@@ -1163,7 +1205,7 @@ def snapshot(
         help="What data to include in the state. "
         "``r``: relation, ``c``: config, ``k``: containers, "
         "``n``: networks, ``S``: secrets(!), ``p``: opened ports, "
-        "``d``: deferred events, ``t``: stored state.",
+        "``d``: deferred events, ``t``: stored state, ``R``: resources (names only).",
     ),
     include_dead_relation_networks: bool = typer.Option(
         False,
