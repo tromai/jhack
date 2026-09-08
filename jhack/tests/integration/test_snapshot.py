@@ -395,3 +395,127 @@ def test_snapshot_pytest_runnable_k8s(juju: jubilant.Juju):
     executable pytest test (i.e. the generated ``test_case`` passes).
     """
     _assert_snapshot_pytest_runnable(juju, K8S_APP_NAME)
+
+
+# ---------------------------------------------------------------------------
+# JSON output assertions
+# ---------------------------------------------------------------------------
+
+
+def _assert_snapshot_json(juju: jubilant.Juju, app_name: str):
+    """Run ``jhack scenario snapshot -f json``, parse the output, and assert
+    that the JSON document is structurally sound and internally consistent.
+
+    These checks verify that jhack correctly serialises every field of the
+    live unit's State to JSON -- i.e. that the serialiser hasn't silently
+    dropped or mis-typed any field.
+    """
+    unit = _any_unit(juju, app_name)
+
+    result = _run_snapshot(juju, unit, "-f", "json", "--devmode")
+    assert result.returncode == 0, (
+        f"jhack scenario snapshot -f json exited {result.returncode}.\n"
+        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+
+    payload = json.loads(result.stdout)
+    assert payload, "JSON output was empty"
+
+    # ------------------------------------------------------------------
+    # Top-level keys: every field of State must be present.
+    # ------------------------------------------------------------------
+    expected_keys = {
+        "config", "relations", "networks", "containers", "storages",
+        "opened_ports", "leader", "model", "secrets", "resources",
+        "planned_units", "deferred", "stored_states",
+        "app_status", "unit_status", "workload_version",
+    }
+    assert expected_keys <= payload.keys(), (
+        f"missing keys: {expected_keys - payload.keys()}"
+    )
+
+    # ------------------------------------------------------------------
+    # Type checks: each field must deserialise to the right Python type.
+    # ------------------------------------------------------------------
+    assert isinstance(payload["config"], dict)
+    assert isinstance(payload["relations"], list)
+    assert isinstance(payload["networks"], list)
+    assert isinstance(payload["containers"], list)
+    assert isinstance(payload["storages"], list)
+    assert isinstance(payload["opened_ports"], list)
+    assert isinstance(payload["leader"], bool)
+    assert isinstance(payload["model"], dict)
+    assert isinstance(payload["secrets"], list)
+    assert isinstance(payload["resources"], list)
+    assert isinstance(payload["planned_units"], int)
+    assert isinstance(payload["deferred"], list)
+    assert isinstance(payload["stored_states"], list)
+    assert isinstance(payload["app_status"], dict)
+    assert isinstance(payload["unit_status"], dict)
+    assert isinstance(payload["workload_version"], str)
+
+    # ------------------------------------------------------------------
+    # Model: name and uuid must be non-empty strings; type must match the
+    # substrate we're testing against.
+    # ------------------------------------------------------------------
+    model = payload["model"]
+    assert model.get("name"), "model.name is empty"
+    assert model.get("uuid"), "model.uuid is empty"
+    # Use the type from the JSON payload itself as the reference — jhack reads
+    # it from ``juju status`` which returns "kubernetes" or "iaas".  We just
+    # verify it is one of the two valid values and is non-empty.
+    assert model.get("type") in ("kubernetes", "iaas"), (
+        f"unexpected model.type: {model.get('type')!r}"
+    )
+
+    # ------------------------------------------------------------------
+    # Status: both app_status and unit_status must have a non-empty name.
+    # ------------------------------------------------------------------
+    assert payload["app_status"].get("name"), "app_status.name is empty"
+    assert payload["unit_status"].get("name"), "unit_status.name is empty"
+
+    # ------------------------------------------------------------------
+    # Networks: at least the juju-info binding must be present and well-formed.
+    # ------------------------------------------------------------------
+    assert payload["networks"], "networks list is empty"
+    binding_names = {n["binding_name"] for n in payload["networks"]}
+    assert "juju-info" in binding_names, (
+        f"juju-info binding missing from networks: {binding_names}"
+    )
+    for net in payload["networks"]:
+        assert "bind_addresses" in net
+        assert "ingress_addresses" in net
+        assert "egress_subnets" in net
+
+    # ------------------------------------------------------------------
+    # Containers (k8s only): each container must have a name and can_connect.
+    # ------------------------------------------------------------------
+    if payload["model"]["type"] == "kubernetes":
+        assert payload["containers"], "containers list is empty on k8s"
+        for c in payload["containers"]:
+            assert c.get("name"), f"container missing name: {c}"
+            assert "can_connect" in c
+
+    # ------------------------------------------------------------------
+    # Cross-check model name against Juju status.
+    # ------------------------------------------------------------------
+    assert payload["model"]["name"] == juju.model, (
+        f"model name mismatch: JSON has {payload['model']['name']!r}, "
+        f"juju model is {juju.model!r}"
+    )
+
+
+@pytest.mark.machine
+def test_snapshot_json_machine(juju: jubilant.Juju):
+    """Verify the ``-f json`` output for the machine leg is valid and
+    structurally sound.
+    """
+    _assert_snapshot_json(juju, MACHINE_APP_NAME)
+
+
+@pytest.mark.k8s
+def test_snapshot_json_k8s(juju: jubilant.Juju):
+    """Verify the ``-f json`` output for the k8s leg is valid and
+    structurally sound.
+    """
+    _assert_snapshot_json(juju, K8S_APP_NAME)
