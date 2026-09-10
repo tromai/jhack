@@ -4,8 +4,7 @@
 
 """Facilities to convert json to State."""
 
-from datetime import datetime
-from pathlib import Path
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Dict
 
 from ops import SecretRotate, pebble
@@ -13,12 +12,16 @@ from scenario import Model, State
 from scenario.state import (
     Address,
     BindAddress,
+    CheckInfo,
     Container,
     DeferredEvent,
+    Exec,
     Network,
+    Notice,
     PeerRelation,
     Port,
     Relation,
+    Resource,
     Secret,
     Storage,
     StoredState,
@@ -67,9 +70,46 @@ def _dict_to_network(value: Dict) -> Network:
     return Network(**value)
 
 
+def _dict_to_exec(value: Dict) -> Exec:
+    return Exec(**value)
+
+
+def _dict_to_notice(value: Dict) -> Notice:
+    value = dict(value)
+    for key in ("first_occurred", "last_occurred", "last_repeated"):
+        if value.get(key):
+            value[key] = datetime.fromisoformat(value[key])
+    for key in ("repeat_after", "expire_after"):
+        if value.get(key) is not None:
+            value[key] = timedelta(seconds=value[key])
+    if value.get("type") is not None:
+        value["type"] = pebble.NoticeType(value["type"])
+    return Notice(**value)
+
+
+def _dict_to_check_info(value: Dict) -> CheckInfo:
+    value = dict(value)
+    for key, enum_type in (
+        ("level", pebble.CheckLevel),
+        ("startup", pebble.CheckStartup),
+        ("status", pebble.CheckStatus),
+        ("change_id", pebble.ChangeID),
+    ):
+        if value.get(key) is not None:
+            value[key] = enum_type(value[key])
+    return CheckInfo(**value)
+
+
 def _dict_to_container(value: Dict) -> Container:
+    value = dict(value)
     if layers := value.get("layers"):
         value["layers"] = {l_name: pebble.Layer(l_raw) for l_name, l_raw in layers.items()}
+    if (execs := value.get("execs")) is not None:
+        value["execs"] = frozenset(_dict_to_exec(exec_) for exec_ in execs)
+    if (notices := value.get("notices")) is not None:
+        value["notices"] = [_dict_to_notice(notice) for notice in notices]
+    if (check_infos := value.get("check_infos")) is not None:
+        value["check_infos"] = frozenset(_dict_to_check_info(check) for check in check_infos)
     return Container(**value)
 
 
@@ -120,7 +160,7 @@ def dict_to_state(state_json: Dict) -> State:
         elif key == "networks":
             overrides[key] = {_dict_to_network(obj) for obj in value}
         elif key == "resources":
-            overrides[key] = {Path(obj) for obj in value}
+            overrides[key] = {Resource(name=obj["name"], path=obj["path"]) for obj in value}
         elif key == "containers":
             overrides[key] = {_dict_to_container(obj) for obj in value}
         elif key == "storages":

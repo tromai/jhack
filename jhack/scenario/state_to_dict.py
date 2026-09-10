@@ -2,37 +2,41 @@
 # Copyright 2023 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Facilities to convert State to json."""
+"""Facilities to convert State to JSON-compatible dictionaries."""
 
-from dataclasses import asdict, fields, is_dataclass
-from typing import TYPE_CHECKING, Dict
+from collections.abc import Mapping
+from dataclasses import fields, is_dataclass
+from datetime import datetime, timedelta
+from enum import Enum
+from pathlib import PurePath
+from typing import Any, Dict
 
 from scenario import State
 
-if TYPE_CHECKING:
-    from scenario.state import AnyRelation
+_RELATION_TYPE_NAMES = frozenset({"Relation", "PeerRelation", "SubordinateRelation"})
 
 
-def _relation_to_dict(value: "AnyRelation") -> Dict:
-    dct = asdict(value)
-    dct["relation_type"] = type(value).__name__
-    return dct
+def _serialize(value: Any) -> Any:
+    """Recursively convert State values into JSON-safe types."""
+    if is_dataclass(value) and not isinstance(value, type):
+        result = {field.name: _serialize(getattr(value, field.name)) for field in fields(value)}
+        if type(value).__name__ in _RELATION_TYPE_NAMES:
+            result["relation_type"] = type(value).__name__
+        return result
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, timedelta):
+        return value.total_seconds()
+    if isinstance(value, PurePath):
+        return str(value)
+    if isinstance(value, Mapping):
+        return {key: _serialize(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_serialize(item) for item in value]
+    return value
 
 
 def state_to_dict(state: State) -> Dict:
-    out = {}
-    for f in fields(state):
-        key = f.name
-        raw_value = getattr(state, f.name)
-        if key == "relations":
-            serialized_value = [_relation_to_dict(r) for r in raw_value]
-        else:
-            if isinstance(raw_value, (list, frozenset)):
-                serialized_value = [asdict(raw_obj) for raw_obj in raw_value]
-            elif is_dataclass(raw_value):
-                serialized_value = asdict(raw_value)
-            else:
-                serialized_value = raw_value
-
-        out[key] = serialized_value
-    return out
+    return {field.name: _serialize(getattr(state, field.name)) for field in fields(state)}
