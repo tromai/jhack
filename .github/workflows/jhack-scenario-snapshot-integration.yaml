@@ -1,0 +1,95 @@
+name: jhack scenario snapshot - live integration smoke tests
+
+on:
+  # Push to this branch registers the workflow with GitHub so the
+  # "Run workflow" button appears in the Actions UI.
+  push:
+  workflow_dispatch:
+    inputs:
+      target-branch:
+        description: >
+          Branch of jhack to test (e.g. "main", "fix/my-branch").
+          The integration tests are always taken from this workflow branch
+          (ci/integration-tests-workflow); only the jhack source code is
+          swapped out for the target branch.
+        required: true
+        default: main
+
+permissions: {}
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    strategy:
+      fail-fast: false
+      matrix:
+        juju-channel: ["3.6/stable", "4.0/stable"]
+        provider: ["k8s", "machine"]
+        base: ["24.04", "26.04"]
+
+    env:
+      JHACK_RUN_INTEGRATION_TESTS: "1"
+      JHACK_TEST_BASE: ${{ matrix.base }}
+
+    steps:
+      # Step 1: check out THIS branch (ci/integration-tests-workflow) so we
+      # have the integration test files, the workflow configs, and pyproject.toml
+      # with the [integration] extras and pytest markers.
+      - name: Checkout integration-test branch (workflow source)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          path: workspace
+
+      # Step 2: check out the target branch into a separate directory so we
+      # can extract only the jhack *source* from it (everything except the
+      # tests/integration directory, which we deliberately keep from Step 1).
+      - name: Checkout target branch (${{ inputs.target-branch }}) for jhack source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          ref: ${{ inputs.target-branch }}
+          path: target-branch
+
+      # Step 3: overlay the target branch's jhack source onto the workspace,
+      # but *skip* jhack/tests/integration so the integration tests from this
+      # workflow branch are preserved.
+      - name: Overlay jhack source from target branch (preserve integration tests)
+        run: |
+          # Copy everything from the target branch except jhack/tests/integration
+          rsync -a \
+            --exclude='jhack/tests/integration/' \
+            target-branch/ \
+            workspace/
+          echo "--- jhack source files from target branch overlaid ---"
+          echo "integration test dir (from workflow branch):"
+          ls workspace/jhack/tests/integration/
+
+      - name: Install concierge
+        run: sudo snap install --classic concierge
+
+      - name: Bootstrap Juju ${{ matrix.juju-channel }} on ${{ matrix.provider }}
+        run: >
+          sudo concierge prepare
+          --juju-channel=${{ matrix.juju-channel }}
+          --preset ${{ matrix.provider }}
+
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+
+      - name: Run jhack scenario snapshot smoke test (${{ matrix.provider }})
+        working-directory: workspace
+        run: |
+          uv run --extra integration pytest jhack/tests/integration \
+            -m ${{ matrix.provider }} \
+            --log-cli-level=INFO -v \
+            --juju-dump-logs=jhack-debug-logs
+        timeout-minutes: 30
+
+      - name: Upload juju debug logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: juju-debug-logs-${{ matrix.juju-channel }}-${{ matrix.provider }}-${{ matrix.base }}-${{ strategy.job-index }}
+          path: workspace/jhack-debug-logs
+          if-no-files-found: ignore
+          include-hidden-files: true
