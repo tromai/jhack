@@ -59,6 +59,7 @@ jobs:
           # Copy everything from the target branch except jhack/tests/integration
           rsync -a \
             --exclude='jhack/tests/integration/' \
+            --exclude='pyproject.toml' \
             target-branch/ \
             workspace/
           echo "--- jhack source files from target branch overlaid ---"
