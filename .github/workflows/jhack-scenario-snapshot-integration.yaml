@@ -79,7 +79,7 @@ jobs:
       - name: Run jhack scenario snapshot smoke test (${{ matrix.provider }})
         working-directory: workspace
         run: |
-          uv run --extra integration pytest jhack/tests/integration \
+          uv run --with ".[integration]" pytest jhack/tests/integration \
             -m ${{ matrix.provider }} \
             --log-cli-level=INFO -v \
             --juju-dump-logs=jhack-debug-logs
