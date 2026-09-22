@@ -154,7 +154,15 @@ def _assert_snapshot_smoke(juju: jubilant.Juju, app_name: str, format_: str):
     """Run `jhack scenario snapshot <unit> -f <format_>` and check it succeeded."""
     unit = _any_unit(juju, app_name)
 
-    result = _run_snapshot(juju, unit, "-f", format_, "--devmode")
+    result = _run_snapshot(
+        juju,
+        unit,
+        "-f",
+        format_,
+        "--devmode",
+        "--include-dead-relation-networks",
+        "--include-juju-relation-data",
+    )
 
     assert result.returncode == 0, (
         f"jhack scenario snapshot exited {result.returncode}.\n"
@@ -333,7 +341,15 @@ def _assert_snapshot_pytest_runnable(juju: jubilant.Juju, app_name: str):
     """
     unit = _any_unit(juju, app_name)
 
-    result = _run_snapshot(juju, unit, "-f", "pytest", "--devmode")
+    result = _run_snapshot(
+        juju,
+        unit,
+        "-f",
+        "pytest",
+        "--devmode",
+        "--include-dead-relation-networks",
+        "--include-juju-relation-data",
+    )
     assert result.returncode == 0, (
         f"jhack scenario snapshot exited {result.returncode}.\n"
         f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -412,7 +428,15 @@ def _assert_snapshot_json(juju: jubilant.Juju, app_name: str):
     """
     unit = _any_unit(juju, app_name)
 
-    result = _run_snapshot(juju, unit, "-f", "json", "--devmode")
+    result = _run_snapshot(
+        juju,
+        unit,
+        "-f",
+        "json",
+        "--devmode",
+        "--include-dead-relation-networks",
+        "--include-juju-relation-data",
+    )
     assert result.returncode == 0, (
         f"jhack scenario snapshot -f json exited {result.returncode}.\n"
         f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"

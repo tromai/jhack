@@ -88,9 +88,77 @@ jobs:
 
       - name: Upload juju debug logs
         if: ${{ !cancelled() }}
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: juju-debug-logs-${{ matrix.juju-channel }}-${{ matrix.provider }}-${{ matrix.base }}-${{ strategy.job-index }}
+          path: workspace/jhack-debug-logs
+          if-no-files-found: ignore
+          include-hidden-files: true
+
+  # Runs the heavier, multi-application integration tests (a workload charm
+  # related to a database and to COS, and a separate charm exercising
+  # `--fetch`). These stand up more applications than the smoke tests above,
+  # so they're restricted to a single leg: Canonical Kubernetes on the
+  # latest supported Ubuntu base.
+  integration-complex:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    env:
+      JHACK_RUN_INTEGRATION_TESTS: "1"
+
+    steps:
+      - name: Checkout integration-test branch (workflow source)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          path: workspace
+
+      - name: Checkout target branch (${{ inputs.target-branch }}) for jhack source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          ref: ${{ inputs.target-branch }}
+          path: target-branch
+
+      - name: Overlay jhack source from target branch (preserve integration tests)
+        run: |
+          rsync -a \
+            --exclude='jhack/tests/integration/' \
+            --exclude='pyproject.toml' \
+            target-branch/ \
+            workspace/
+          echo "--- jhack source files from target branch overlaid ---"
+          echo "integration test dir (from workflow branch):"
+          ls workspace/jhack/tests/integration/
+
+      - name: Install concierge
+        run: sudo snap install --classic concierge
+
+      - name: Bootstrap Juju 4.0/stable on Canonical Kubernetes (base 26.04)
+        run: >
+          sudo concierge prepare
+          --juju-channel=4.0/stable
+          --preset k8s
+
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+
+      - name: Run jhack scenario snapshot complex-model and fetch tests
+        working-directory: workspace
+        run: |
+          uv run --with ".[integration]" pytest \
+            jhack/tests/integration/test_snapshot_complex_model.py \
+            jhack/tests/integration/test_snapshot_fetch.py \
+            -m k8s \
+            --log-cli-level=INFO -v \
+            --juju-dump-logs=jhack-debug-logs
+        timeout-minutes: 30
+
+      - name: Upload juju debug logs
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: juju-debug-logs-complex-k8s-26.04
           path: workspace/jhack-debug-logs
           if-no-files-found: ignore
           include-hidden-files: true
