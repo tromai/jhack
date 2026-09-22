@@ -14,6 +14,13 @@ on:
           swapped out for the target branch.
         required: true
         default: main
+      run-complex-integration-tests:
+        description: >
+          Whether to run the heavier, multi-application "integration-complex"
+          job (database + COS relations, --fetch).
+        type: boolean
+        required: false
+        default: true
 
 permissions: {}
 
@@ -99,9 +106,11 @@ jobs:
   # Runs the heavier, multi-application integration tests (a workload charm
   # related to a database and to COS, and a separate charm exercising
   # `--fetch`). These stand up more applications than the smoke tests above,
-  # so they're restricted to a single leg: Canonical Kubernetes on the
-  # latest supported Ubuntu base.
+  # so they're restricted to a single leg: Canonical Kubernetes on Juju
+  # 3.6/stable and base 24.04 (the charms deployed here aren't yet available
+  # on Juju 4 / the latest Ubuntu base).
   integration-complex:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run-complex-integration-tests }}
     runs-on: ubuntu-latest
     continue-on-error: true
 
@@ -134,10 +143,10 @@ jobs:
       - name: Install concierge
         run: sudo snap install --classic concierge
 
-      - name: Bootstrap Juju 4.0/stable on Canonical Kubernetes (base 26.04)
+      - name: Bootstrap Juju 3.6/stable on Canonical Kubernetes (base 24.04)
         run: >
           sudo concierge prepare
-          --juju-channel=4.0/stable
+          --juju-channel=3.6/stable
           --preset k8s
 
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
@@ -158,7 +167,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
-          name: juju-debug-logs-complex-k8s-26.04
+          name: juju-debug-logs-complex-k8s-24.04
           path: workspace/jhack-debug-logs
           if-no-files-found: ignore
           include-hidden-files: true
