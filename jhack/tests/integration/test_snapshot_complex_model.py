@@ -51,8 +51,8 @@ def test_deploy_complex_model(juju: jubilant.Juju):
     """Deploy a small COS+database topology to snapshot against."""
     juju.deploy(APP_NAME, config={"debug": True})
     juju.deploy(DB_APP_NAME, channel="14/stable", trust=True)
-    juju.deploy(PROMETHEUS_APP_NAME, channel="latest/stable", trust=True)
-    juju.deploy(GRAFANA_APP_NAME, channel="latest/stable", trust=True)
+    juju.deploy(PROMETHEUS_APP_NAME, channel="2/stable", trust=True)
+    juju.deploy(GRAFANA_APP_NAME, channel="2/stable", trust=True)
 
     juju.integrate(APP_NAME, DB_APP_NAME)
     juju.integrate(APP_NAME, PROMETHEUS_APP_NAME)

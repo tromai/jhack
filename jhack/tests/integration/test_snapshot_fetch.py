@@ -40,7 +40,7 @@ REMOTE_FILE = "/var/lib/grafana/grafana.ini"
 @pytest.mark.juju_setup
 def test_deploy_fetch_target(juju: jubilant.Juju):
     """Deploy grafana-k8s to snapshot/fetch against."""
-    juju.deploy(APP_NAME, channel="latest/stable", trust=True)
+    juju.deploy(APP_NAME, channel="2/stable", trust=True)
     juju.wait(jubilant.all_active, timeout=20 * 60)
 
 
