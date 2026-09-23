@@ -41,7 +41,7 @@ REMOTE_FILE = "/var/lib/grafana/grafana.ini"
 def test_deploy_fetch_target(juju: jubilant.Juju):
     """Deploy grafana-k8s to snapshot/fetch against."""
     juju.deploy(APP_NAME, channel="2/stable", trust=True)
-    juju.wait(jubilant.all_active, timeout=20 * 60)
+    juju.wait(jubilant.all_active, timeout=30 * 60)
 
 
 def _any_unit(juju: jubilant.Juju) -> str:

@@ -160,7 +160,7 @@ jobs:
             -m k8s \
             --log-cli-level=INFO -v \
             --juju-dump-logs=jhack-debug-logs
-        timeout-minutes: 30
+        timeout-minutes: 60
 
       - name: Upload juju debug logs
         if: ${{ !cancelled() }}

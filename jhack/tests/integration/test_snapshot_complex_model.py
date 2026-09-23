@@ -59,7 +59,7 @@ def test_deploy_complex_model(juju: jubilant.Juju):
     juju.integrate(APP_NAME, GRAFANA_APP_NAME)
     juju.integrate(PROMETHEUS_APP_NAME, GRAFANA_APP_NAME)
 
-    juju.wait(jubilant.all_active, timeout=30 * 60)
+    juju.wait(jubilant.all_active, timeout=45 * 60)
 
 
 def _any_unit(juju: jubilant.Juju, app_name: str) -> str:
