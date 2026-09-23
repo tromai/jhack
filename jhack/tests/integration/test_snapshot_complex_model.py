@@ -54,7 +54,10 @@ def test_deploy_complex_model(juju: jubilant.Juju):
     juju.deploy(PROMETHEUS_APP_NAME, channel="2/stable", trust=True)
     juju.deploy(GRAFANA_APP_NAME, channel="2/stable", trust=True)
 
-    juju.integrate(APP_NAME, DB_APP_NAME)
+    # mattermost-k8s:db matches both postgresql-k8s:db and postgresql-k8s:db-admin,
+    # so the endpoint must be disambiguated explicitly; db (not db-admin) is the
+    # least-privileged, correct relation for this workload charm.
+    juju.integrate(f"{APP_NAME}:db", f"{DB_APP_NAME}:db")
     juju.integrate(APP_NAME, PROMETHEUS_APP_NAME)
     juju.integrate(APP_NAME, GRAFANA_APP_NAME)
     juju.integrate(PROMETHEUS_APP_NAME, GRAFANA_APP_NAME)
