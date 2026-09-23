@@ -97,7 +97,7 @@ def format_state(state: State):
 
 PYTEST_TEST_TEMPLATE = """
 from scenario import *
-from charm import {ct}
+from charm import {ct}  # TODO: replace with charm type name
 
 def test_case():
     # Arrange: prepare the state
@@ -192,7 +192,7 @@ def format_test_case(
     juju_version: str = None,
 ):
     """Format this State as a pytest test case."""
-    ct = charm_type_name or "CHARM_TYPE,  # TODO: replace with charm type name"
+    ct = charm_type_name or "CHARM_TYPE"
     en = "EVENT_NAME,  # TODO: replace with event name"
     if event_name:
         try:
@@ -435,7 +435,7 @@ def get_mounts(
     model: Optional[str],
     container_name: str,
     container_meta: Dict,
-    fetch_files: Optional[Dict[Path, Path]] = None,
+    fetch_files: Optional[Sequence[Union[Path, str]]] = None,
     temp_dir_base_path: Path = SNAPSHOT_OUTPUT_DIR,
 ) -> Dict[str, Mount]:
     """Get named Mounts from a container's metadata, and download specified files from the unit."""
@@ -457,6 +457,11 @@ def get_mounts(
 
     mounts = {}
     for remote_path in fetch_files or ():
+        # fetch_files is typically loaded from a user-provided json spec via
+        # json.loads(), which yields plain str, not pathlib.Path. Coerce it
+        # here so the rest of this function can rely on Path semantics
+        # (e.g. `.parts`) regardless of where the caller got its data from.
+        remote_path = Path(remote_path)
         found = None
         for mn, mt in mount_spec.items():
             if str(remote_path).startswith(mt):
@@ -500,7 +505,7 @@ def get_container(
     model: Optional[str],
     container_name: str,
     container_meta: Dict,
-    fetch_files: Optional[List[Path]] = None,
+    fetch_files: Optional[Sequence[Union[Path, str]]] = None,
     temp_dir_base_path: Path = SNAPSHOT_OUTPUT_DIR,
 ) -> Container:
     """Get container data structure from the target."""
@@ -527,7 +532,7 @@ def get_containers(
     target: JujuUnitName,
     model: Optional[str],
     metadata: Optional[Dict],
-    fetch_files: Dict[str, List[Path]] = None,
+    fetch_files: Optional[Dict[str, Sequence[Union[Path, str]]]] = None,
     temp_dir_base_path: Path = SNAPSHOT_OUTPUT_DIR,
 ) -> List[Container]:
     """Get all containers from this unit."""
@@ -958,7 +963,7 @@ def _snapshot(
     include_dead_relation_networks=False,
     format_: FormatOption = "state",
     event_name: Optional[str] = None,
-    fetch_files: Optional[Dict[str, Dict[Path, Path]]] = None,
+    fetch_files: Optional[Dict[str, Sequence[Union[Path, str]]]] = None,
     temp_dir_base_path: Path = SNAPSHOT_OUTPUT_DIR,
 ):
     """see snapshot's docstring"""
