@@ -93,12 +93,21 @@ jobs:
             --juju-dump-logs=jhack-debug-logs
         timeout-minutes: 30
 
+      # Artifact names can't contain "/", which matrix.juju-channel does
+      # (e.g. "3.6/stable"); compute a sanitized slug to use in the name.
+      - name: Compute debug-log artifact name
+        if: ${{ !cancelled() }}
+        id: artifact-name
+        run: |
+          slug="juju-debug-logs-${{ matrix.juju-channel }}-${{ matrix.provider }}-${{ matrix.base }}-${{ strategy.job-index }}"
+          echo "name=${slug//\//-}" >> "$GITHUB_OUTPUT"
+
       - name: Upload juju debug logs
         if: ${{ !cancelled() }}
         continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
-          name: juju-debug-logs-${{ matrix.juju-channel }}-${{ matrix.provider }}-${{ matrix.base }}-${{ strategy.job-index }}
+          name: ${{ steps.artifact-name.outputs.name }}
           path: workspace/jhack-debug-logs
           if-no-files-found: ignore
           include-hidden-files: true
