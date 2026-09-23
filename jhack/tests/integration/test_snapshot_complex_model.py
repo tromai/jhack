@@ -14,6 +14,10 @@ Real Charmhub charms are used instead of the tutorial's own fastapi-demo
 
 - mattermost-k8s: workload charm (config option, action, requires a
   database via postgresql_client, provides metrics-endpoint/grafana-dashboard).
+  Only the ``latest/edge`` channel (the go-framework rewrite) has these
+  relations; ``latest/stable`` (revision 18) is a much older release with
+  just ``db`` (interface ``pgsql``) and ``ingress``, so the channel must be
+  pinned explicitly.
 - postgresql-k8s: database.
 - prometheus-k8s / grafana-k8s: COS pieces integrated with mattermost-k8s.
 
@@ -49,17 +53,19 @@ GRAFANA_APP_NAME = "grafana-k8s"
 @pytest.mark.juju_setup
 def test_deploy_complex_model(juju: jubilant.Juju):
     """Deploy a small COS+database topology to snapshot against."""
-    juju.deploy(APP_NAME, config={"debug": True})
+    # latest/stable (revision 18) is a legacy release with no COS relations;
+    # only latest/edge (the go-framework rewrite) provides
+    # metrics-endpoint/grafana-dashboard and requires postgresql (interface
+    # postgresql_client), which this test depends on.
+    juju.deploy(APP_NAME, channel="latest/edge", config={"debug": True})
     juju.deploy(DB_APP_NAME, channel="14/stable", trust=True)
     juju.deploy(PROMETHEUS_APP_NAME, channel="2/stable", trust=True)
     juju.deploy(GRAFANA_APP_NAME, channel="2/stable", trust=True)
 
-    # mattermost-k8s (a go-framework charm) requires postgresql-k8s over its
-    # "postgresql" endpoint (interface postgresql_client) -- not "db". That
-    # name matches both postgresql-k8s:db and postgresql-k8s:db-admin, so the
-    # postgresql-k8s side must be disambiguated explicitly; db (not db-admin)
-    # is the least-privileged, correct relation for this workload charm.
-    juju.integrate(f"{APP_NAME}:postgresql", f"{DB_APP_NAME}:db")
+    # mattermost-k8s:postgresql uses interface postgresql_client, which on
+    # postgresql-k8s is provided by the "database" endpoint -- not "db"
+    # (interface pgsql, a different/legacy interface).
+    juju.integrate(f"{APP_NAME}:postgresql", f"{DB_APP_NAME}:database")
     # mattermost-k8s provides metrics-endpoint/grafana-dashboard (COS
     # integration), matching prometheus-k8s/grafana-k8s's requires side 1:1,
     # so no explicit endpoint is needed on either side.
