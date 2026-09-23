@@ -54,13 +54,21 @@ def test_deploy_complex_model(juju: jubilant.Juju):
     juju.deploy(PROMETHEUS_APP_NAME, channel="2/stable", trust=True)
     juju.deploy(GRAFANA_APP_NAME, channel="2/stable", trust=True)
 
-    # mattermost-k8s:db matches both postgresql-k8s:db and postgresql-k8s:db-admin,
-    # so the endpoint must be disambiguated explicitly; db (not db-admin) is the
-    # least-privileged, correct relation for this workload charm.
-    juju.integrate(f"{APP_NAME}:db", f"{DB_APP_NAME}:db")
+    # mattermost-k8s (a go-framework charm) requires postgresql-k8s over its
+    # "postgresql" endpoint (interface postgresql_client) -- not "db". That
+    # name matches both postgresql-k8s:db and postgresql-k8s:db-admin, so the
+    # postgresql-k8s side must be disambiguated explicitly; db (not db-admin)
+    # is the least-privileged, correct relation for this workload charm.
+    juju.integrate(f"{APP_NAME}:postgresql", f"{DB_APP_NAME}:db")
+    # mattermost-k8s provides metrics-endpoint/grafana-dashboard (COS
+    # integration), matching prometheus-k8s/grafana-k8s's requires side 1:1,
+    # so no explicit endpoint is needed on either side.
     juju.integrate(APP_NAME, PROMETHEUS_APP_NAME)
     juju.integrate(APP_NAME, GRAFANA_APP_NAME)
-    juju.integrate(PROMETHEUS_APP_NAME, GRAFANA_APP_NAME)
+    # prometheus-k8s and grafana-k8s share multiple interfaces (including
+    # "grafana-dashboard" the other direction), so grafana-source must be
+    # specified explicitly to disambiguate, per the charms' own docs.
+    juju.integrate(f"{PROMETHEUS_APP_NAME}:grafana-source", f"{GRAFANA_APP_NAME}:grafana-source")
 
     juju.wait(jubilant.all_active, timeout=45 * 60)
 
