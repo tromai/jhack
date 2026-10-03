@@ -72,7 +72,7 @@ except FileNotFoundError as e:
     raise Exception("cannot run jhack from a deleted folder") from e
 
 
-SNAPSHOT_OUTPUT_DIR = (Path(getcwd).parent / "snapshot_storage").absolute()
+SNAPSHOT_OUTPUT_DIR = (Path(getcwd) / "snapshot_storage").absolute()
 CHARM_SUBCLASS_REGEX = re.compile(r"class (\D+)\(CharmBase\):")
 
 
@@ -1195,6 +1195,10 @@ def snapshot(
     """
 
     fetch_files: Optional[Dict[str, List[Path]]] = None
+    # If output dir is not provide, it uses SNAPSHOT_OUTPUT_DIR
+    # which might not exist.
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     if fetch is not None:
         fetch_file_json = json.loads(fetch.read_text())
 
