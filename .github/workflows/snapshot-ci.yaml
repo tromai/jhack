@@ -1,0 +1,126 @@
+name: jhack scenario snapshot - lint, format and unit tests
+
+# Scope: the `jhack scenario snapshot` module only (jhack/scenario/snapshot.py) and the
+# unit tests that import it. The exact file list lives in .github/snapshot-scope.sh.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ops-version:
+        description: >
+          Optional ops version / specifier to test against (e.g. "3.9.0" or ">=3.9,<4").
+          Empty: use what pyproject.toml declares.
+        required: false
+        default: ""
+      ops-scenario-version:
+        description: >
+          Optional ops-scenario (ops[testing]) version / specifier (e.g. "8.9.0").
+          Empty: whatever ops[testing] pulls in for the chosen ops version.
+        required: false
+        default: ""
+      ops-git-ref:
+        description: >
+          Optional git ref of the operator repo to install ops and ops-scenario from
+          (e.g. "main", "my-branch", "myfork/operator@my-branch",
+          "canonical/operator@refs/pull/2000/head"). Overrides the two inputs above.
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: ruff + pyright (snapshot module)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+
+      - name: Patch ops dependencies (workflow_dispatch inputs)
+        run: >
+          python3 .github/scripts/patch_ops_deps.py
+          --ops-version "$OPS_VERSION"
+          --ops-scenario-version "$OPS_SCENARIO_VERSION"
+          --ops-git-ref "$OPS_GIT_REF"
+        env:
+          OPS_VERSION: ${{ inputs.ops-version }}
+          OPS_SCENARIO_VERSION: ${{ inputs.ops-scenario-version }}
+          OPS_GIT_REF: ${{ inputs.ops-git-ref }}
+
+      - name: Install jhack and linters
+        run: |
+          uv venv --python 3.12 .venv
+          overrides=()
+          [ -f uv-overrides.txt ] && overrides=(--override uv-overrides.txt)
+          uv pip install --python .venv/bin/python "${overrides[@]}" -e ".[dev]"
+          uv pip list --python .venv/bin/python | grep -iE '^(ops|ops-scenario|ruff|pyright) '
+
+      - name: ruff check
+        run: |
+          source .github/snapshot-scope.sh
+          .venv/bin/ruff check --output-format=github "${SNAPSHOT_SRC[@]}" "${SNAPSHOT_TESTS[@]}"
+
+      - name: ruff format --check
+        run: |
+          source .github/snapshot-scope.sh
+          .venv/bin/ruff format --check --diff "${SNAPSHOT_SRC[@]}" "${SNAPSHOT_TESTS[@]}"
+
+      - name: pyright
+        run: |
+          source .github/snapshot-scope.sh
+          .venv/bin/pyright --pythonpath .venv/bin/python "${SNAPSHOT_SRC[@]}" "${SNAPSHOT_TESTS[@]}"
+
+  unit:
+    name: unit tests (python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # requires-python is >=3.10; the snap (core24) ships 3.12.
+        python-version: ["3.10", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+
+      - name: Patch ops dependencies (workflow_dispatch inputs)
+        run: >
+          python3 .github/scripts/patch_ops_deps.py
+          --ops-version "$OPS_VERSION"
+          --ops-scenario-version "$OPS_SCENARIO_VERSION"
+          --ops-git-ref "$OPS_GIT_REF"
+        env:
+          OPS_VERSION: ${{ inputs.ops-version }}
+          OPS_SCENARIO_VERSION: ${{ inputs.ops-scenario-version }}
+          OPS_GIT_REF: ${{ inputs.ops-git-ref }}
+
+      - name: Install jhack and test dependencies
+        run: |
+          uv venv --python "${{ matrix.python-version }}" .venv
+          overrides=()
+          [ -f uv-overrides.txt ] && overrides=(--override uv-overrides.txt)
+          uv pip install --python .venv/bin/python "${overrides[@]}" -e ".[dev]"
+          uv pip list --python .venv/bin/python | grep -iE '^(ops|ops-scenario) '
+
+      - name: Unit tests (snapshot module) with coverage
+        run: |
+          source .github/snapshot-scope.sh
+          .venv/bin/coverage run --include='jhack/scenario/snapshot.py' \
+            -m pytest --tb short -v "${SNAPSHOT_TESTS[@]}"
+          .venv/bin/coverage report -m | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Tests of the CI helper scripts
+        run: .venv/bin/python -m pytest -q .github/scripts
