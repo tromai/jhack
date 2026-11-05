@@ -122,5 +122,7 @@ jobs:
             -m pytest --tb short -v "${SNAPSHOT_TESTS[@]}"
           .venv/bin/coverage report -m | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # the helper scripts run on the runner's python (3.12) and need tomllib (>= 3.11).
       - name: Tests of the CI helper scripts
+        if: ${{ matrix.python-version != '3.10' }}
         run: .venv/bin/python -m pytest -q .github/scripts
