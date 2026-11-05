@@ -1,4 +1,4 @@
-name: jhack scenario snapshot - live integration smoke tests
+name: jhack scenario snapshot - live integration tests
 
 on:
   # Push to this branch registers the workflow with GitHub so the
@@ -9,23 +9,95 @@ on:
       target-branch:
         description: >
           Branch of jhack to test (e.g. "main", "fix/my-branch").
-          The integration tests are always taken from this workflow branch
-          (ci/integration-tests-workflow); only the jhack source code is
+          The integration tests are always taken from the branch this workflow runs on;
+          only the jhack source (and pyproject.toml, uv.lock, snapcraft.yaml) is
           swapped out for the target branch.
         required: true
         default: main
-      run-complex-integration-tests:
+      ops-version:
         description: >
-          Whether to run the heavier, multi-application "integration-complex"
-          job (database + COS relations, --fetch).
+          Optional ops version / specifier to install instead of what the target branch
+          declares (e.g. "3.9.0" or ">=3.9,<4"). Empty: keep the target branch's.
+        required: false
+        default: ""
+      ops-scenario-version:
+        description: >
+          Optional ops-scenario (the ops[testing] extra) version / specifier, e.g. "8.9.0".
+          Empty: whatever ops[testing] pulls in for the ops version.
+        required: false
+        default: ""
+      ops-git-ref:
+        description: >
+          Optional git ref of the operator repo to install ops AND ops-scenario from
+          (e.g. "main", "my-branch", "myfork/operator@my-branch",
+          "canonical/operator@refs/pull/2000/head"). Overrides the two inputs above.
+        required: false
+        default: ""
+      run-snap-tests:
+        description: >
+          Also build the jhack snap and run the same tests through it (Juju 3.6 legs only;
+          the snap bundles a Juju 3.6 client).
         type: boolean
         required: false
         default: true
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
+  # Build the snap once from the (patched) target-branch source; the Juju 3.6
+  # legs of the matrix below install it.
+  build-snap:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run-snap-tests }}
+    runs-on: ubuntu-24.04  # core24 base
+    continue-on-error: true
+    steps:
+      - name: Checkout integration-test branch (workflow source)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          path: workspace
+          persist-credentials: false
+
+      - uses: ./workspace/.github/actions/prepare-workspace
+        with:
+          target-branch: ${{ inputs.target-branch }}
+          ops-version: ${{ inputs.ops-version }}
+          ops-scenario-version: ${{ inputs.ops-scenario-version }}
+          ops-git-ref: ${{ inputs.ops-git-ref }}
+
+      - name: Install snapcraft
+        run: sudo snap install snapcraft --classic
+
+      - name: Build the snap
+        working-directory: workspace
+        run: snapcraft pack --destructive-mode --verbosity=brief
+        timeout-minutes: 30
+
+      - name: Record the versions bundled in the snap
+        working-directory: workspace
+        run: |
+          sudo snap install --dangerous ./jhack_*.snap
+          {
+            echo "### jhack snap"
+            echo '```'
+            snap list jhack
+            snap run --shell jhack -c 'python3 -c "import importlib.metadata as m; print(\"ops\", m.version(\"ops\"), \"ops-scenario\", m.version(\"ops-scenario\"))"' || true
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          sudo snap remove --purge jhack
+
+      - name: Upload the snap
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: jhack-snap
+          path: workspace/jhack_*.snap
+          if-no-files-found: error
+          retention-days: 7
+
   integration:
+    needs: build-snap
+    # run even when the snap job was skipped or failed: the module tests don't need it.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     continue-on-error: true
 
@@ -35,43 +107,33 @@ jobs:
         juju-channel: ["3.6/stable", "4.0/stable"]
         provider: ["k8s", "machine"]
         base: ["24.04", "26.04"]
+        exclude:
+          # JHACK_TEST_BASE only selects the base of the machine leg's charms; on k8s a
+          # 26.04 leg would repeat the 24.04 one.
+          - provider: k8s
+            base: "26.04"
 
     env:
       JHACK_RUN_INTEGRATION_TESTS: "1"
       JHACK_TEST_BASE: ${{ matrix.base }}
 
     steps:
-      # Step 1: check out THIS branch (ci/integration-tests-workflow) so we
-      # have the integration test files, the workflow configs, and pyproject.toml
-      # with the [integration] extras and pytest markers.
+      # Step 1: check out THIS branch so we have the integration tests, the workflow
+      # configs and the helper scripts.
       - name: Checkout integration-test branch (workflow source)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           path: workspace
+          persist-credentials: false
 
-      # Step 2: check out the target branch into a separate directory so we
-      # can extract only the jhack *source* from it (everything except the
-      # tests/integration directory, which we deliberately keep from Step 1).
-      - name: Checkout target branch (${{ inputs.target-branch }}) for jhack source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      # Step 2: overlay the target branch's jhack source (except jhack/tests/integration
+      # and .github/) and patch the ops dependency if asked to.
+      - uses: ./workspace/.github/actions/prepare-workspace
         with:
-          ref: ${{ inputs.target-branch }}
-          path: target-branch
-
-      # Step 3: overlay the target branch's jhack source onto the workspace,
-      # but *skip* jhack/tests/integration so the integration tests from this
-      # workflow branch are preserved.
-      - name: Overlay jhack source from target branch (preserve integration tests)
-        run: |
-          # Copy everything from the target branch except jhack/tests/integration
-          rsync -a \
-            --exclude='jhack/tests/integration/' \
-            --exclude='pyproject.toml' \
-            target-branch/ \
-            workspace/
-          echo "--- jhack source files from target branch overlaid ---"
-          echo "integration test dir (from workflow branch):"
-          ls workspace/jhack/tests/integration/
+          target-branch: ${{ inputs.target-branch }}
+          ops-version: ${{ inputs.ops-version }}
+          ops-scenario-version: ${{ inputs.ops-scenario-version }}
+          ops-git-ref: ${{ inputs.ops-git-ref }}
 
       - name: Install concierge
         run: sudo snap install --classic concierge
@@ -82,16 +144,58 @@ jobs:
           --juju-channel=${{ matrix.juju-channel }}
           --preset ${{ matrix.provider }}
 
+      # The snap bundles a Juju 3.6 client, so it is only exercised against Juju 3.6.
+      - name: Download the jhack snap
+        id: snap-artifact
+        if: ${{ needs.build-snap.result == 'success' && matrix.juju-channel == '3.6/stable' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: jhack-snap
+          path: jhack-snap
+
+      - name: Install the jhack snap
+        id: snap
+        if: ${{ steps.snap-artifact.outcome == 'success' }}
+        run: |
+          mkdir -p "$HOME/.config/jhack" "$HOME/.local/share/juju"
+          sudo snap install --dangerous ./jhack-snap/jhack_*.snap
+          sudo snap connect jhack:dot-local-share-juju
+          sudo snap connect jhack:dot-config-jhack
+          sudo snap connect jhack:ssh-read
+          snap connections jhack
+          jhack version
+          echo "enabled=1" >> "$GITHUB_OUTPUT"
+
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
 
-      - name: Run jhack scenario snapshot smoke test (${{ matrix.provider }})
+      # An explicit venv instead of `uv run --with`: the latter would first sync the
+      # project from uv.lock and so test whatever ops is locked, not what we asked for.
+      - name: Install jhack and the integration test dependencies
         working-directory: workspace
         run: |
-          uv run --with ".[integration]" pytest jhack/tests/integration \
+          uv venv --python 3.12 .venv
+          overrides=()
+          [ -f uv-overrides.txt ] && overrides=(--override uv-overrides.txt)
+          uv pip install --python .venv/bin/python "${overrides[@]}" \
+            -e . -r jhack/tests/integration/requirements.txt
+          {
+            echo "### Versions (${{ matrix.juju-channel }}, ${{ matrix.provider }}, ${{ matrix.base }})"
+            echo '```'
+            uv pip list --python .venv/bin/python | grep -iE '^(jhack|ops|ops-scenario|jubilant|pytest-jubilant) '
+            juju version
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Run jhack scenario snapshot integration tests (${{ matrix.provider }})
+        working-directory: workspace
+        env:
+          JHACK_TEST_SNAP: ${{ steps.snap.outputs.enabled }}
+        run: |
+          .venv/bin/python -m pytest jhack/tests/integration \
             -m ${{ matrix.provider }} \
             --log-cli-level=INFO -v \
             --juju-dump-logs=jhack-debug-logs
-        timeout-minutes: 30
+        timeout-minutes: 60
 
       # Artifact names can't contain "/", which matrix.juju-channel does
       # (e.g. "3.6/stable"); compute a sanitized slug to use in the name.
@@ -99,7 +203,7 @@ jobs:
         if: ${{ !cancelled() }}
         id: artifact-name
         run: |
-          slug="juju-debug-logs-${{ matrix.juju-channel }}-${{ matrix.provider }}-${{ matrix.base }}-${{ strategy.job-index }}"
+          slug="juju-debug-logs-${{ matrix.juju-channel }}-${{ matrix.provider }}-${{ matrix.base }}"
           echo "name=${slug//\//-}" >> "$GITHUB_OUTPUT"
 
       - name: Upload juju debug logs
@@ -108,75 +212,6 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: ${{ steps.artifact-name.outputs.name }}
-          path: workspace/jhack-debug-logs
-          if-no-files-found: ignore
-          include-hidden-files: true
-
-  # Runs the heavier, multi-application integration tests (a workload charm
-  # related to a database and to COS, and a separate charm exercising
-  # `--fetch`). These stand up more applications than the smoke tests above,
-  # so they're restricted to a single leg: Canonical Kubernetes on Juju
-  # 3.6/stable and base 24.04 (the charms deployed here aren't yet available
-  # on Juju 4 / the latest Ubuntu base).
-  integration-complex:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run-complex-integration-tests }}
-    runs-on: ubuntu-latest
-    continue-on-error: true
-
-    env:
-      JHACK_RUN_INTEGRATION_TESTS: "1"
-
-    steps:
-      - name: Checkout integration-test branch (workflow source)
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-        with:
-          path: workspace
-
-      - name: Checkout target branch (${{ inputs.target-branch }}) for jhack source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-        with:
-          ref: ${{ inputs.target-branch }}
-          path: target-branch
-
-      - name: Overlay jhack source from target branch (preserve integration tests)
-        run: |
-          rsync -a \
-            --exclude='jhack/tests/integration/' \
-            --exclude='pyproject.toml' \
-            target-branch/ \
-            workspace/
-          echo "--- jhack source files from target branch overlaid ---"
-          echo "integration test dir (from workflow branch):"
-          ls workspace/jhack/tests/integration/
-
-      - name: Install concierge
-        run: sudo snap install --classic concierge
-
-      - name: Bootstrap Juju 3.6/stable on Canonical Kubernetes (base 24.04)
-        run: >
-          sudo concierge prepare
-          --juju-channel=3.6/stable
-          --preset k8s
-
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
-
-      - name: Run jhack scenario snapshot complex-model and fetch tests
-        working-directory: workspace
-        run: |
-          uv run --with ".[integration]" pytest \
-            jhack/tests/integration/test_snapshot_complex_model.py \
-            jhack/tests/integration/test_snapshot_fetch.py \
-            -m k8s \
-            --log-cli-level=INFO -v \
-            --juju-dump-logs=jhack-debug-logs
-        timeout-minutes: 60
-
-      - name: Upload juju debug logs
-        if: ${{ !cancelled() }}
-        continue-on-error: true
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
-        with:
-          name: juju-debug-logs-complex-k8s-24.04
           path: workspace/jhack-debug-logs
           if-no-files-found: ignore
           include-hidden-files: true
