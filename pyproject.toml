@@ -41,6 +41,16 @@ dev = [
     "pyproject-flake8",
     "pep8-naming",
     "isort",
+    "pyright",
+]
+# The live integration tests' extra dependencies live in
+# jhack/tests/integration/requirements.txt.
+
+[tool.pytest.ini_options]
+log_cli_format = "%(levelname)s %(name)s %(message)s"
+markers = [
+    "machine: live integration test targets a machine (lxd) substrate.",
+    "k8s: live integration test targets a Canonical Kubernetes substrate.",
 ]
 
 [project.scripts]
@@ -51,6 +61,20 @@ jhack = "jhack"
 
 [tool.ruff]
 line-length = 99
+
+# Lint rules are enforced in CI for the `jhack scenario snapshot` module only
+# (see .github/snapshot-scope.sh for the exact file list).
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = [
+    "B008",  # typer.Option(...) in argument defaults is the typer idiom
+    "B904",  # raise ... from err: pre-existing, out of scope
+    "UP042",  # FormatOption(str, Enum): kept for typer compatibility
+]
+
+[tool.pyright]
+typeCheckingMode = "standard"
+reportMissingImports = true
 
 [tool.black]
 include = '\.pyi?$'

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from enum import Enum
 from importlib import metadata
 from itertools import chain
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from subprocess import run
 from typing import (
     Any,
@@ -127,7 +127,7 @@ def bind_event_to_state(event: _Event, state: State):
     In case of ambiguity (e.g. multiple relations found on 'foo' for event
     'foo-relation-changed', we pop a warning and bind the first one. Use with care!
     """
-    entity_name = event._path.prefix  # noqa
+    entity_name = event._path.prefix  # noqa  # pyright: ignore[reportAttributeAccessIssue]
 
     if event._is_workload_event and not event.container:  # noqa
         try:
@@ -351,7 +351,8 @@ class RemotePebbleClient:
     def _run(self, cmd: str) -> str:
         _model = f" -m {self.model}" if self.model else ""
 
-        # charm container commands go straight to the charm container's pebble; no need to set a socket.
+        # charm container commands go straight to the charm container's pebble;
+        # no need to set a socket.
         socket_var = f" PEBBLE_SOCKET={self.socket_path}" if self.container != "charm" else ""
         command = f"juju ssh{_model} {self.target.unit_name}{socket_var} /charm/bin/pebble {cmd}"
 
@@ -366,7 +367,8 @@ class RemotePebbleClient:
             return proc.stdout
 
         if re.compile(
-            rf"error: cannot communicate with server: Get (\S+): socket \"{self.socket_path}\" not found"
+            rf"error: cannot communicate with server: Get (\S+): "
+            rf"socket \"{self.socket_path}\" not found"
         ).match(proc.stdout):
             raise InvalidContainerNameError(self.container)
 
@@ -454,7 +456,7 @@ def get_mounts(
     for remote_path in fetch_files or ():
         found = None
         for mn, mt in mount_spec.items():
-            location = Path(mt)
+            location = PurePosixPath(mt)
             if not remote_path.is_relative_to(location):
                 continue
             # Pick the most specific mount location for remote_path.
@@ -486,7 +488,7 @@ def get_mounts(
         # In this case Mount.location is `/var/lib/data`. Mount.source is `<temp_dir_base_path>`.
         # Each mount will have a different <temp_dir_base_path>, and the returns State object
         # will always point to the same <temp_dir_base_path>s that it was generated against.
-        filepath = Path(mount.source) / remote_path.relative_to(mount.location)
+        filepath = Path(mount.source) / remote_path.relative_to(mount_location)
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         try:
             fetch_blob(

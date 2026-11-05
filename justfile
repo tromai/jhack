@@ -12,6 +12,32 @@ lock:
 requirements:
     uv pip compile -q --no-cache pyproject.toml -o requirements.txt
 
+# Lint, format-check and type-check the `jhack scenario snapshot` module only
+# (same checks as .github/workflows/snapshot-ci.yaml; scope: .github/snapshot-scope.sh)
+lint-snapshot:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+    source .github/snapshot-scope.sh
+    uv run --extra dev ruff check "${SNAPSHOT_SRC[@]}" "${SNAPSHOT_TESTS[@]}"
+    uv run --extra dev ruff format --check --diff "${SNAPSHOT_SRC[@]}" "${SNAPSHOT_TESTS[@]}"
+    uv run --extra dev pyright "${SNAPSHOT_SRC[@]}" "${SNAPSHOT_TESTS[@]}"
+
+# Format the `jhack scenario snapshot` module only
+fmt-snapshot:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+    source .github/snapshot-scope.sh
+    uv run --extra dev ruff check --fix-only "${SNAPSHOT_SRC[@]}" "${SNAPSHOT_TESTS[@]}"
+    uv run --extra dev ruff format "${SNAPSHOT_SRC[@]}" "${SNAPSHOT_TESTS[@]}"
+
+# Run the unit tests that cover the `jhack scenario snapshot` module only
+unit-snapshot:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+    source .github/snapshot-scope.sh
+    uv run --extra dev coverage run --include='jhack/scenario/snapshot.py' -m pytest --tb short -v "${SNAPSHOT_TESTS[@]}"
+    uv run --extra dev coverage report -m
+
 # Lint code
 lint:
     uv tool run ruff check .
