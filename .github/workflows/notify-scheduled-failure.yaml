@@ -1,0 +1,56 @@
+name: Notify on scheduled failure
+
+# Reusable workflow: opens (or comments on) an issue when a scheduled workflow fails.
+# Adapted from canonical/operator's notify-scheduled-failure.yaml, without the AI triage.
+#
+# Callers gate the invocation with `if: failure() && github.event_name == 'schedule'` and
+# grant `permissions: issues: write` plus `actions: read` (to list the failed jobs).
+#
+# The repository needs Issues enabled.
+
+on:
+  workflow_call:
+    inputs:
+      details:
+        description: Extra markdown to put in the issue / comment (what was tested, ...).
+        type: string
+        required: false
+        default: ""
+
+permissions: {}
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      actions: read
+    steps:
+      - name: Create or comment on issue, deduping coarsely by workflow name
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_NAME: ${{ github.workflow }}  # The workflow that called this one.
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DETAILS: ${{ inputs.details }}
+        run: |
+          set -euo pipefail
+
+          failed_jobs=$(gh run view "$RUN_ID" --repo "$REPO" --json jobs \
+            -q '.jobs[] | select(.conclusion == "failure") | "- [\(.name)](\(.url))"' || true)
+          body_details="${DETAILS:+$DETAILS$'\n\n'}${failed_jobs:+"Failed jobs:"$'\n'"$failed_jobs"$'\n\n'}"
+
+          # Search for the workflow name in issue bodies or titles.
+          match=$(gh issue list --repo "$REPO" --state open \
+            --search "\"$WORKFLOW_NAME\" in:title" \
+            --json number --limit 1 -q '.[0].number // empty')
+
+          if [[ -n "$match" ]]; then
+            gh issue comment "$match" --repo "$REPO" \
+              --body "Scheduled workflow '$WORKFLOW_NAME' failed again: $RUN_URL"$'\n\n'"$body_details"
+          else
+            gh issue create --repo "$REPO" \
+              --title "Scheduled workflow '$WORKFLOW_NAME' failed" \
+              --body "Scheduled workflow '$WORKFLOW_NAME' failed: $RUN_URL"$'\n\n'"$body_details"
+          fi

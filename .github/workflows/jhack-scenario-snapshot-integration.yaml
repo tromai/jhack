@@ -4,8 +4,49 @@ on:
   # Push to this branch registers the workflow with GitHub so the
   # "Run workflow" button appears in the Actions UI.
   push:
+  # Reused by scheduled-integration.yaml.
+  workflow_call:
+    inputs:
+      target-repository:
+        description: Repository (owner/name) holding the jhack source to test.
+        type: string
+        required: false
+        default: ""
+      target-branch:
+        description: Branch, tag or sha of jhack to test.
+        type: string
+        required: false
+        default: ""
+      ops-version:
+        description: ops version / specifier, or "lock" for the versions pinned in uv.lock.
+        type: string
+        required: false
+        default: ""
+      ops-scenario-version:
+        type: string
+        required: false
+        default: ""
+      ops-git-ref:
+        type: string
+        required: false
+        default: ""
+      run-snap-tests:
+        type: boolean
+        required: false
+        default: true
+      label:
+        description: Suffix for artifact names, to tell apart several calls in one run.
+        type: string
+        required: false
+        default: ""
   workflow_dispatch:
     inputs:
+      target-repository:
+        description: >
+          Repository (owner/name) holding the jhack source to test. Empty: this repository
+          (e.g. use "canonical/jhack" to test upstream's branch).
+        required: false
+        default: ""
       target-branch:
         description: >
           Branch of jhack to test (e.g. "main", "fix/my-branch").
@@ -17,7 +58,8 @@ on:
       ops-version:
         description: >
           Optional ops version / specifier to install instead of what the target branch
-          declares (e.g. "3.9.0" or ">=3.9,<4"). Empty: keep the target branch's.
+          declares (e.g. "3.9.0" or ">=3.9,<4"), or "lock" for the ops / ops-scenario
+          versions pinned in the target's uv.lock. Empty: keep the target branch's.
         required: false
         default: ""
       ops-scenario-version:
@@ -48,9 +90,9 @@ jobs:
   # Build the snap once from the (patched) target-branch source; the Juju 3.6
   # legs of the matrix below install it.
   build-snap:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run-snap-tests }}
+    # inputs.run-snap-tests is empty on push; only an explicit false opts out.
+    if: ${{ format('{0}', inputs.run-snap-tests) != 'false' }}
     runs-on: ubuntu-24.04  # core24 base
-    continue-on-error: true
     steps:
       - name: Checkout integration-test branch (workflow source)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
@@ -60,6 +102,7 @@ jobs:
 
       - uses: ./workspace/.github/actions/prepare-workspace
         with:
+          target-repository: ${{ inputs.target-repository || github.repository }}
           target-branch: ${{ inputs.target-branch }}
           ops-version: ${{ inputs.ops-version }}
           ops-scenario-version: ${{ inputs.ops-scenario-version }}
@@ -89,7 +132,7 @@ jobs:
       - name: Upload the snap
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
-          name: jhack-snap
+          name: jhack-snap${{ inputs.label && format('-{0}', inputs.label) || '' }}
           path: workspace/jhack_*.snap
           if-no-files-found: error
           retention-days: 7
@@ -99,7 +142,6 @@ jobs:
     # run even when the snap job was skipped or failed: the module tests don't need it.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     strategy:
       fail-fast: false
@@ -130,6 +172,7 @@ jobs:
       # and .github/) and patch the ops dependency if asked to.
       - uses: ./workspace/.github/actions/prepare-workspace
         with:
+          target-repository: ${{ inputs.target-repository || github.repository }}
           target-branch: ${{ inputs.target-branch }}
           ops-version: ${{ inputs.ops-version }}
           ops-scenario-version: ${{ inputs.ops-scenario-version }}
@@ -150,7 +193,7 @@ jobs:
         if: ${{ needs.build-snap.result == 'success' && matrix.juju-channel == '3.6/stable' }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
-          name: jhack-snap
+          name: jhack-snap${{ inputs.label && format('-{0}', inputs.label) || '' }}
           path: jhack-snap
 
       - name: Install the jhack snap
@@ -172,6 +215,8 @@ jobs:
       # project from uv.lock and so test whatever ops is locked, not what we asked for.
       - name: Install jhack and the integration test dependencies
         working-directory: workspace
+        env:
+          LABEL: ${{ inputs.label }}
         run: |
           uv venv --python 3.12 .venv
           overrides=()
@@ -179,7 +224,7 @@ jobs:
           uv pip install --python .venv/bin/python "${overrides[@]}" \
             -e . -r jhack/tests/integration/requirements.txt
           {
-            echo "### Versions (${{ matrix.juju-channel }}, ${{ matrix.provider }}, ${{ matrix.base }})"
+            echo "### Versions (${{ matrix.juju-channel }}, ${{ matrix.provider }}, ${{ matrix.base }}) $LABEL"
             echo '```'
             uv pip list --python .venv/bin/python | grep -iE '^(jhack|ops|ops-scenario|jubilant|pytest-jubilant) '
             juju version
@@ -204,7 +249,10 @@ jobs:
         id: artifact-name
         run: |
           slug="juju-debug-logs-${{ matrix.juju-channel }}-${{ matrix.provider }}-${{ matrix.base }}"
+          [ -n "$LABEL" ] && slug="$slug-$LABEL"
           echo "name=${slug//\//-}" >> "$GITHUB_OUTPUT"
+        env:
+          LABEL: ${{ inputs.label }}
 
       - name: Upload juju debug logs
         if: ${{ !cancelled() }}

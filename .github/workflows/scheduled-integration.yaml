@@ -1,0 +1,104 @@
+name: jhack scenario snapshot - scheduled integration tests
+
+# Every other week, run the live integration tests against the latest commit of upstream
+# jhack (canonical/jhack, main), twice:
+#
+#   shipped   with the ops / ops-scenario versions pinned in jhack's uv.lock;
+#   upstream  with ops / ops-scenario built from the latest commit of canonical/operator main.
+#
+# The tests, helper scripts and workflows come from this repository's default branch;
+# only the jhack source (and pyproject.toml, uv.lock, snapcraft.yaml) comes from upstream.
+# If anything fails, an issue is opened (or commented on) -- see notify-scheduled-failure.yaml.
+
+on:
+  # GitHub cron has no "every two weeks": run every Monday and let `resolve` skip every
+  # other one (the parity of the number of weeks since the epoch is stable, also across years).
+  schedule:
+    - cron: "0 5 * * 1"
+  # Manual runs ignore the fortnightly gate; the failure issue is only opened for scheduled runs.
+  workflow_dispatch:
+
+permissions: {}
+
+env:
+  UPSTREAM_JHACK: canonical/jhack
+  UPSTREAM_JHACK_REF: main
+  UPSTREAM_OPERATOR: canonical/operator
+  UPSTREAM_OPERATOR_REF: main
+
+jobs:
+  resolve:
+    name: resolve what to test
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+      jhack-sha: ${{ steps.shas.outputs.jhack }}
+      operator-sha: ${{ steps.shas.outputs.operator }}
+    steps:
+      - name: Fortnightly gate
+        id: gate
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            week=$(( $(date -u +%s) / 86400 / 7 ))
+            if [ $(( week % 2 )) -eq 0 ]; then run=true; else run=false; fi
+          else
+            run=true
+          fi
+          echo "week index $week -> run=$run" || true
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+      # Resolve once, so that both variants test the same commits, and the failure
+      # issue can say exactly what was tested.
+      - name: Resolve the latest upstream commits
+        id: shas
+        if: ${{ steps.gate.outputs.run == 'true' }}
+        run: |
+          jhack_sha=$(git ls-remote "https://github.com/$UPSTREAM_JHACK" "refs/heads/$UPSTREAM_JHACK_REF" | cut -f1)
+          operator_sha=$(git ls-remote "https://github.com/$UPSTREAM_OPERATOR" "refs/heads/$UPSTREAM_OPERATOR_REF" | cut -f1)
+          [ -n "$jhack_sha" ] && [ -n "$operator_sha" ]
+          echo "jhack=$jhack_sha" >> "$GITHUB_OUTPUT"
+          echo "operator=$operator_sha" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Scheduled run"
+            echo
+            echo "- jhack: \`$UPSTREAM_JHACK@$jhack_sha\` ($UPSTREAM_JHACK_REF)"
+            echo "- operator: \`$UPSTREAM_OPERATOR@$operator_sha\` ($UPSTREAM_OPERATOR_REF)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  integration:
+    name: integration (ops ${{ matrix.ops }})
+    needs: resolve
+    if: ${{ needs.resolve.outputs.run == 'true' }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ops: shipped
+            ops-version: lock
+          - ops: upstream
+            ops-version: ""
+    uses: ./.github/workflows/jhack-scenario-snapshot-integration.yaml
+    with:
+      target-repository: canonical/jhack
+      target-branch: ${{ needs.resolve.outputs.jhack-sha }}
+      ops-version: ${{ matrix.ops-version }}
+      ops-git-ref: ${{ matrix.ops == 'upstream' && format('canonical/operator@{0}', needs.resolve.outputs.operator-sha) || '' }}
+      run-snap-tests: true
+      label: ops-${{ matrix.ops }}
+
+  open-issue-on-failure-if-scheduled:
+    needs: [resolve, integration]
+    if: ${{ failure() && github.event_name == 'schedule' }}
+    permissions:
+      issues: write
+      actions: read  # to list the failed jobs
+    uses: ./.github/workflows/notify-scheduled-failure.yaml
+    with:
+      details: |
+        Tested commits:
+        - jhack: `canonical/jhack@${{ needs.resolve.outputs.jhack-sha }}` (main)
+        - operator (the `upstream` ops variant): `canonical/operator@${{ needs.resolve.outputs.operator-sha }}` (main)
+        - the `shipped` ops variant uses the versions pinned in jhack's uv.lock

@@ -98,3 +98,39 @@ def test_stale_overrides_removed(project):
     (project / "uv-overrides.txt").write_text("x\n")
     run(project, "--ops-version", "3.9.0")
     assert not (project / "uv-overrides.txt").exists()
+
+
+LOCK = """\
+version = 1
+
+[[package]]
+name = "ops"
+version = "3.7.0"
+
+[[package]]
+name = "ops-scenario"
+version = "8.7.0"
+
+[[package]]
+name = "typer"
+version = "0.18.0"
+"""
+
+
+def test_ops_version_lock(project):
+    (project / "uv.lock").write_text(LOCK)
+    run(project, "--ops-version", "lock")
+    assert _deps(project)[:2] == ["ops==3.7.0", "ops-scenario==8.7.0"]
+    assert not (project / "uv.lock").exists()
+
+
+def test_ops_version_lock_needs_a_lock(project):
+    (project / "uv.lock").unlink()
+    with pytest.raises(SystemExit):
+        run(project, "--ops-version", "lock")
+
+
+def test_ops_version_lock_cannot_be_combined(project):
+    (project / "uv.lock").write_text(LOCK)
+    with pytest.raises(SystemExit):
+        run(project, "--ops-version", "lock", "--ops-git-ref", "main")
