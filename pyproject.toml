@@ -43,12 +43,8 @@ dev = [
     "isort",
     "pyright",
 ]
-integration = [
-    "pytest",
-    "jubilant>=1.8,<2",
-    "pytest-jubilant>=2,<3",
-    "PyYAML",
-]
+# The live integration tests' extra dependencies live in
+# jhack/tests/integration/requirements.txt.
 
 [tool.pytest.ini_options]
 log_cli_format = "%(levelname)s %(name)s %(message)s"
