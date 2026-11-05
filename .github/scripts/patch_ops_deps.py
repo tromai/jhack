@@ -11,6 +11,9 @@ checkout *before* installing jhack:
     patch_ops_deps.py --ops-version 3.9.0 --ops-scenario-version 8.9.0
     patch_ops_deps.py --ops-version '>=3.9,<4'
 
+    # the versions pinned in uv.lock: what jhack's developers actually test against
+    patch_ops_deps.py --ops-version lock
+
     # a git ref of the operator repo (installs both ops and ops-scenario from it)
     patch_ops_deps.py --ops-git-ref main
     patch_ops_deps.py --ops-git-ref myfork/operator@my-branch
@@ -25,7 +28,7 @@ What it does when asked to patch:
 * writes ``uv-overrides.txt`` next to pyproject.toml (git mode only; use it with
   ``uv pip install --override uv-overrides.txt ...``) so that ops-scenario's exact
   ``ops==<dev version>`` pin resolves to the git checkout;
-* removes ``uv.lock`` (it would pin the old ops);
+* removes ``uv.lock`` (it would pin the old ops), after reading it for ``--ops-version lock``;
 * prints what it did (and appends it to ``$GITHUB_STEP_SUMMARY`` when set).
 """
 
@@ -47,6 +50,22 @@ def normalise_specifier(spec: str) -> str:
     if not spec:
         return ""
     return f"=={spec}" if spec[0].isdigit() else spec
+
+
+def versions_from_lock(lock: Path) -> tuple[str, str]:
+    """The (ops, ops-scenario) versions pinned in a uv.lock file."""
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # python < 3.11
+        raise SystemExit("'--ops-version lock' needs python >= 3.11 (tomllib)") from None
+    if not lock.exists():
+        raise SystemExit(f"'--ops-version lock': {lock} does not exist")
+    packages = tomllib.loads(lock.read_text()).get("package", [])
+    versions = {p["name"]: p["version"] for p in packages if p["name"] in ("ops", "ops-scenario")}
+    missing = {"ops", "ops-scenario"} - versions.keys()
+    if missing:
+        raise SystemExit(f"{lock} does not pin: {', '.join(sorted(missing))}")
+    return versions["ops"], versions["ops-scenario"]
 
 
 def parse_git_ref(value: str) -> tuple[str, str]:
@@ -97,7 +116,12 @@ def patch_pyproject(text: str, requirements: list[str]) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--pyproject", type=Path, default=Path("pyproject.toml"))
-    parser.add_argument("--ops-version", default="", help="ops version or specifier")
+    parser.add_argument(
+        "--ops-version",
+        default="",
+        help="ops version or specifier, or 'lock' for the ops / ops-scenario versions "
+        "pinned in uv.lock",
+    )
     parser.add_argument(
         "--ops-scenario-version",
         default="",
@@ -119,6 +143,11 @@ def main(argv: list[str] | None = None) -> int:
     if not (ops_version or scenario_version or git_ref):
         print("no ops override requested: pyproject.toml left untouched")
         return 0
+
+    if ops_version == "lock":
+        if scenario_version or git_ref:
+            raise SystemExit("--ops-version lock cannot be combined with other ops options")
+        ops_version, scenario_version = versions_from_lock(args.pyproject.parent / "uv.lock")
 
     requirements, overrides = build_requirements(ops_version, scenario_version, git_ref)
 

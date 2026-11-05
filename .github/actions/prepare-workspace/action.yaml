@@ -6,12 +6,18 @@ description: >
   ./workspace already.
 
 inputs:
+  target-repository:
+    description: Repository (owner/name) holding the jhack source to test.
+    required: false
+    default: ${{ github.repository }}
   target-branch:
-    description: Branch of jhack to test (empty means the branch that triggered the workflow).
+    description: Branch, tag or sha of jhack to test (empty means the ref that triggered the workflow).
     required: false
     default: ""
   ops-version:
-    description: ops version or specifier, for example 3.9.0 (empty to leave as is).
+    description: >
+      ops version or specifier, for example 3.9.0, or "lock" for the versions pinned in
+      the target's uv.lock (empty to leave as is).
     required: false
     default: ""
   ops-scenario-version:
@@ -28,9 +34,10 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Checkout target branch (${{ inputs.target-branch }}) for jhack source
+    - name: Checkout target (${{ inputs.target-repository }}@${{ inputs.target-branch }}) for jhack source
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       with:
+        repository: ${{ inputs.target-repository }}
         ref: ${{ inputs.target-branch }}
         path: target-branch
         persist-credentials: false
@@ -39,6 +46,8 @@ runs:
     # branch: jhack source, pyproject.toml, uv.lock, snapcraft.yaml.
     - name: Overlay jhack source from the target branch
       shell: bash
+      env:
+        TARGET_REPOSITORY: ${{ inputs.target-repository }}
       run: |
         rsync -a \
           --exclude='.git/' \
@@ -46,11 +55,11 @@ runs:
           --exclude='jhack/tests/integration/' \
           target-branch/ \
           workspace/
-        echo "target branch: $(git -C target-branch rev-parse --abbrev-ref HEAD) @ $(git -C target-branch rev-parse HEAD)"
+        echo "jhack under test: ${TARGET_REPOSITORY} @ $(git -C target-branch rev-parse HEAD)"
         {
           echo "### jhack under test"
           echo
-          echo "- target branch: \`$(git -C target-branch rev-parse --abbrev-ref HEAD)\` @ \`$(git -C target-branch rev-parse --short HEAD)\`"
+          echo "- \`${TARGET_REPOSITORY}\` @ \`$(git -C target-branch rev-parse HEAD)\` ($(git -C target-branch rev-parse --abbrev-ref HEAD))"
         } >> "$GITHUB_STEP_SUMMARY"
 
     - name: Patch ops dependencies
