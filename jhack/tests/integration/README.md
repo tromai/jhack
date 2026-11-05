@@ -41,3 +41,21 @@ workflow) takes:
 
 The dependency override is done by `.github/scripts/patch_ops_deps.py`, which you can also
 run by hand on a checkout.
+
+## Scheduled runs
+
+`scheduled-integration.yaml` runs every other Monday against the latest commit of upstream
+jhack (`canonical/jhack` main), twice: with the `ops` / `ops-scenario` versions pinned in
+jhack's `uv.lock` (`shipped`), and with `ops` built from the latest commit of
+`canonical/operator` main (`upstream`). It can also be started by hand (Run workflow) to run
+immediately, ignoring the fortnightly gate.
+
+When a scheduled run fails, `notify-scheduled-failure.yaml` opens an issue listing the commits
+that were tested and the failed jobs, or comments on the open one. Close the issue once fixed.
+
+Notes:
+
+* GitHub only runs `schedule` triggers from the repository's default branch, so these
+  workflows (and the tests) have to be on `main` of the repository that runs them.
+* The repository needs Issues enabled.
+* GitHub disables scheduled workflows after 60 days without repository activity.

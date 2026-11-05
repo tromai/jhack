@@ -181,11 +181,21 @@ jobs:
       - name: Install concierge
         run: sudo snap install --classic concierge
 
+      # concierge occasionally fails on an install hook timing out (seen: the rockcraft snap's
+      # configure hook), which would otherwise open a scheduled-failure issue for nothing.
       - name: Bootstrap Juju ${{ matrix.juju-channel }} on ${{ matrix.provider }}
-        run: >
-          sudo concierge prepare
-          --juju-channel=${{ matrix.juju-channel }}
-          --preset ${{ matrix.provider }}
+        run: |
+          for attempt in 1 2 3; do
+            if sudo concierge prepare \
+              --juju-channel=${{ matrix.juju-channel }} \
+              --preset ${{ matrix.provider }}; then
+              exit 0
+            fi
+            echo "concierge prepare failed (attempt $attempt/3)"
+            sudo concierge restore || true
+            sleep 15
+          done
+          exit 1
 
       # The snap bundles a Juju 3.6 client, so it is only exercised against Juju 3.6.
       - name: Download the jhack snap
