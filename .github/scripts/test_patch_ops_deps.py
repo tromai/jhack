@@ -2,10 +2,11 @@
 
 import importlib.util
 import sys
-import tomllib
 from pathlib import Path
 
 import pytest
+
+tomllib = pytest.importorskip("tomllib")  # python >= 3.11 (the CI runner uses 3.12)
 
 _spec = importlib.util.spec_from_file_location(
     "patch_ops_deps", Path(__file__).parent / "patch_ops_deps.py"
